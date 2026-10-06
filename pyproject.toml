@@ -6,3 +6,6 @@ requires-python = ">=3.11"
 
 [tool.fastapi]
 entrypoint = "backend.app.main:app"
+
+[tool.setuptools.packages.find]
+include = ["backend*"]
