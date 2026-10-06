@@ -1,0 +1,17 @@
+﻿node_modules/
+__pycache__/
+.venv/
+venv/
+dist/
+build/
+.env
+*.mp4
+*.mov
+*.avi
+*.webm
+
+data/thumbnails/
+
+data/uploads/
+
+frontend/.env.development
