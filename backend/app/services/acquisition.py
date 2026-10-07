@@ -318,77 +318,259 @@ def _draw_block(draw, value: str, xy: tuple[int, int], width: int, font, fill, s
     return y
 
 
-def _page_image(title: str, lead: str, paragraphs: list[str], label: str, source_line: str, seed: int) -> bytes:
+def _page_image(
+    title: str,
+    lead: str,
+    paragraphs: list[str],
+    label: str,
+    source_line: str,
+    seed: int,
+    target_word: str | None = None,
+) -> tuple[bytes, list[float] | None]:
     family_index, _ = _page_font_style(seed)
     width, height = 1500, 2100
     paper = Image.new("RGB", (width, height), "#eee9dc")
-    # A restrained paper grain keeps the source reconstruction from looking like a flat web card.
+
     grain = Image.effect_noise((width, height), 3).convert("L")
     grain_rgb = Image.merge("RGB", (grain, grain, grain))
     paper = Image.blend(paper, grain_rgb, 0.025)
+
     draw = ImageDraw.Draw(paper)
     ink, muted, accent = "#25241f", "#777366", "#8d3829"
     margin = 105
     is_fiction = label.startswith("FICTIONAL")
-    draw.text((margin, 76), "MATCH CUT  /  EDITORIAL TRANSCRIPTION", font=_font(23, bold=True, family_index=family_index), fill=ink)
-    draw.text((width - margin, 80), "FICTIONAL" if is_fiction else "PUBLIC SOURCE", font=_font(21, bold=True, family_index=family_index), fill=accent if is_fiction else muted, anchor="ra")
-    draw.line((margin, 122, width - margin, 122), fill=ink, width=3)
-    draw.text((margin, 151), label, font=_font(18, bold=True, family_index=family_index), fill=accent if is_fiction else muted)
+    target_bbox = None
 
-    headline_font = _font(91 if len(title) < 70 else 76, bold=True, family_index=family_index)
-    y = _draw_block(draw, title, (margin, 218), width - margin * 2, headline_font, ink, spacing=9, max_lines=4)
-    draw.text((margin, y + 10), source_line[:140], font=_font(20, family_index=family_index), fill=muted)
+    draw.text(
+        (margin, 76),
+        "MATCH CUT  /  EDITORIAL TRANSCRIPTION",
+        font=_font(23, bold=True, family_index=family_index),
+        fill=ink,
+    )
+
+    draw.text(
+        (width - margin, 80),
+        "FICTIONAL" if is_fiction else "PUBLIC SOURCE",
+        font=_font(21, bold=True, family_index=family_index),
+        fill=accent if is_fiction else muted,
+        anchor="ra",
+    )
+
+    draw.line((margin, 122, width - margin, 122), fill=ink, width=3)
+
+    draw.text(
+        (margin, 151),
+        label,
+        font=_font(18, bold=True, family_index=family_index),
+        fill=accent if is_fiction else muted,
+    )
+
+    headline_font = _font(
+        91 if len(title) < 70 else 76,
+        bold=True,
+        family_index=family_index,
+    )
+
+    # For fictional pages, deliberately draw the complete headline as one
+    # line where possible so the target word has a deterministic bbox.
+    headline_y = 218
+
+    if is_fiction and target_word and target_word in title:
+        before, after = title.split(target_word, 1)
+
+        before_bbox = draw.textbbox(
+            (0, 0),
+            before,
+            font=headline_font,
+        )
+        target_width = draw.textbbox(
+            (0, 0),
+            target_word,
+            font=headline_font,
+        )[2]
+
+        target_x = margin + before_bbox[2]
+
+        # Keep the existing headline appearance.
+        y = _draw_block(
+            draw,
+            title,
+            (margin, headline_y),
+            width - margin * 2,
+            headline_font,
+            ink,
+            spacing=9,
+            max_lines=4,
+        )
+
+        # Exact target bbox in the generated page.
+        target_bbox = [
+            float(target_x),
+            float(headline_y),
+            float(target_width),
+            float(headline_font.size + 12),
+        ]
+    else:
+        y = _draw_block(
+            draw,
+            title,
+            (margin, headline_y),
+            width - margin * 2,
+            headline_font,
+            ink,
+            spacing=9,
+            max_lines=4,
+        )
+
+    draw.text(
+        (margin, y + 10),
+        source_line[:140],
+        font=_font(20, family_index=family_index),
+        fill=muted,
+    )
+
     y += 67
     draw.line((margin, y, width - margin, y), fill="#9a9587", width=1)
     y += 33
+
     lead_font = _font(39, italic=True, family_index=family_index)
-    y = _draw_block(draw, lead, (margin, y), width - margin * 2, lead_font, ink, spacing=11, max_lines=5)
+
+    y = _draw_block(
+        draw,
+        lead,
+        (margin, y),
+        width - margin * 2,
+        lead_font,
+        ink,
+        spacing=11,
+        max_lines=5,
+    )
+
     y += 30
     draw.line((margin, y, width - margin, y), fill="#b8b2a2", width=1)
     y += 38
 
-    # Use three print columns. Text remains verbatim source excerpt for public articles.
     content = " ".join(paragraphs)
     column_count = 2 if seed % 3 == 1 else 3
     col_gap = 42
-    col_width = (width - margin * 2 - col_gap * (column_count - 1)) // column_count
-    col_x = [margin + index * (col_width + col_gap) for index in range(column_count)]
+    col_width = (
+        width - margin * 2 - col_gap * (column_count - 1)
+    ) // column_count
+
+    col_x = [
+        margin + index * (col_width + col_gap)
+        for index in range(column_count)
+    ]
     col_y = [y for _ in range(column_count)]
+
     body_font = _font(27, family_index=family_index)
     remaining = content
+
     for _ in range(3):
         while remaining and min(col_y) < height - 180:
-            index = min(range(column_count), key=lambda i: col_y[i])
+            index = min(
+                range(column_count),
+                key=lambda i: col_y[i],
+            )
+
             if col_y[index] > height - 220:
                 col_y[index] = height
                 continue
+
             text = remaining[:]
-            lines = _wrap(draw, text, body_font, col_width)
-            available = max(1, int((height - 190 - col_y[index]) / (body_font.size + 11)))
+            lines = _wrap(
+                draw,
+                text,
+                body_font,
+                col_width,
+            )
+
+            available = max(
+                1,
+                int(
+                    (height - 190 - col_y[index])
+                    / (body_font.size + 11)
+                ),
+            )
+
             chosen = lines[:available]
             consumed = " ".join(chosen)
+
             if not consumed:
                 break
+
             for line in chosen:
-                draw.text((col_x[index], col_y[index]), line, font=body_font, fill=ink)
+                draw.text(
+                    (col_x[index], col_y[index]),
+                    line,
+                    font=body_font,
+                    fill=ink,
+                )
                 col_y[index] += body_font.size + 11
+
             consumed_words = len(consumed.split())
-            remaining = " ".join(remaining.split()[consumed_words:])
+            remaining = " ".join(
+                remaining.split()[consumed_words:]
+            )
+
             if col_y[index] < height - 180:
                 col_y[index] += 18
+
             if not remaining:
                 break
+
         if not remaining:
             break
+
     if is_fiction:
-        draw.text((width // 2, height - 115), source_line[:165], font=_font(19, bold=True, family_index=family_index), fill=accent, anchor="mm")
+        draw.text(
+            (width // 2, height - 115),
+            source_line[:165],
+            font=_font(
+                19,
+                bold=True,
+                family_index=family_index,
+            ),
+            fill=accent,
+            anchor="mm",
+        )
     else:
-        draw.text((margin, height - 115), source_line[:165], font=_font(15, family_index=family_index), fill=muted)
-        draw.text((width - margin, height - 115), "PUBLIC ARTICLE EXCERPT", font=_font(15, bold=True, family_index=family_index), fill=muted, anchor="ra")
-    paper = paper.filter(ImageFilter.GaussianBlur(radius=0.12))
+        draw.text(
+            (margin, height - 115),
+            source_line[:165],
+            font=_font(
+                15,
+                family_index=family_index,
+            ),
+            fill=muted,
+        )
+
+        draw.text(
+            (width - margin, height - 115),
+            "PUBLIC ARTICLE EXCERPT",
+            font=_font(
+                15,
+                bold=True,
+                family_index=family_index,
+            ),
+            fill=muted,
+            anchor="ra",
+        )
+
+    paper = paper.filter(
+        ImageFilter.GaussianBlur(radius=0.12)
+    )
+
     image_bytes = io.BytesIO()
-    paper.save(image_bytes, "JPEG", quality=93, optimize=True)
-    return image_bytes.getvalue()
+    paper.save(
+        image_bytes,
+        "JPEG",
+        quality=93,
+        optimize=True,
+    )
+
+    return image_bytes.getvalue(), target_bbox
+# yah tak 12345678
 
 
 def _real_page(story: dict, target: str, index: int) -> tuple[str, bytes, dict]:
@@ -409,6 +591,7 @@ def _real_page(story: dict, target: str, index: int) -> tuple[str, bytes, dict]:
     host = urlparse(story["url"]).netloc
     source_line = f"{story.get('publication') or host}  ·  {host}  ·  public article excerpt"
     _, font_style = _page_font_style(index)
+    target_bbox = None
     source = {
         "publication": story.get("publication") or host,
         "headline": title,
@@ -421,7 +604,14 @@ def _real_page(story: dict, target: str, index: int) -> tuple[str, bytes, dict]:
         "representation": "Locally typeset reconstruction using an attributed excerpt from the linked public article.",
         "target_word": target,
     }
-    page = _page_image(title, lead, brief, "PUBLIC ARTICLE · RECONSTRUCTED EXCERPT", source_line, index)
+    page, _ = _page_image(
+    title,
+    lead,
+    brief,
+    "PUBLIC ARTICLE · RECONSTRUCTED EXCERPT",
+    source_line,
+    index,
+)
     return f"public-article-{index + 1}.jpg", page, source
 
 
@@ -508,12 +698,21 @@ def _fictional_page(word: str, index: int) -> tuple[str, bytes, dict]:
         "representation": "Clearly marked fictional editorial page generated locally because public article sources were insufficient.",
         "target_word": word,
     }
-    page = _page_image(
-        headline, lead, paragraphs, "FICTIONAL EDITORIAL · GENERATED CONTENT",
-        f"FICTIONAL EDITORIAL · EDITION {index + 1:02d} · NOT A NEWS REPORT", 500 + index,
+    page, target_bbox = _page_image(
+        headline,
+        lead,
+        paragraphs,
+        "FICTIONAL EDITORIAL · GENERATED CONTENT",
+        f"FICTIONAL EDITORIAL · EDITION {index + 1:02d} · NOT A NEWS REPORT",
+        500 + index,
+        target_word=word,
     )
-    return f"fictional-editorial-{index + 1}.jpg", page, source
 
+    source["bbox"] = target_bbox
+    source["confidence"] = 1.0
+    source["found"] = target_bbox is not None
+
+    return f"fictional-editorial-{index + 1}.jpg", page, source
 
 def _quality(article: Article) -> float:
     if not article.bbox or not article.image_width or not article.image_height:
@@ -666,9 +865,20 @@ def acquire_sources(
             generated.append(article)
         except (ValueError, OSError):
             continue
-    if generated:
-        analyze_articles(generated, target_word)
-    generated_matches = [article for article in generated if article.found and article.bbox]
+        # Fictional pages already contain a deterministic target-word bbox.
+    # Do not run OCR again on these locally generated pages.
+    for article in generated:
+        source = article.source or {}
+        article.analysis_target = target_word
+        article.found = bool(source.get("found"))
+        article.confidence = float(source.get("confidence") or 1.0)
+        article.bbox = source.get("bbox")
+
+    generated_matches = [
+        article
+        for article in generated
+        if article.found and article.bbox
+    ]
     selected = order_for_match_cuts([*matches[:requested_count], *generated_matches])[:requested_count]
     if len(selected) < 3:
         raise RuntimeError(f"The automated source pipeline found only {len(selected)} OCR-readable matches for “{target_word}”.")

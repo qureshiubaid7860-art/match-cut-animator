@@ -23,6 +23,7 @@ def analyze_articles(articles: list[Article], target_word: str, progress: Callab
             article.ocr_error = None
             write_box_thumbnail(article.path, article.thumbnail_path, article.bbox)
         except Exception as exc:
+            print(f"[OCR ERROR] article={article.id} target={target_word!r} path={article.path} error={exc!r}", flush=True)
             article.found = False
             article.bbox = None
             article.confidence = 0.0

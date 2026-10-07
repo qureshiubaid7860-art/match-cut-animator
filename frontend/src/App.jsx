@@ -1,7 +1,7 @@
 ﻿import React, { useEffect, useRef, useState } from 'react';
 import rewardedAdService, { isRewardedAdGateEnabled } from './services/rewardedAd.js';
 
-const API = import.meta.env.VITE_API_ORIGIN || '';
+const API = (import.meta.env.VITE_API_ORIGIN || '').replace(/\/+$/, '');
 const ASPECT_RATIOS = [
   { id: '16:9', label: '16:9 — Landscape', shortLabel: 'LANDSCAPE', width: 1920, height: 1080 },
   { id: '9:16', label: '9:16 — Vertical / Shorts / Reels / TikTok', shortLabel: 'VERTICAL', width: 1080, height: 1920 },
@@ -68,6 +68,11 @@ async function apiRequest(path, options = {}) {
     throw new Error(message || `Request failed (${response.status}).`);
   }
   return payload;
+}
+
+function mediaUrl(path) {
+  if (!path || /^https?:\/\//i.test(path)) return path || '';
+  return `${API}${path.startsWith('/') ? path : `/${path}`}`;
 }
 
 function sourceHost(url) {
@@ -588,7 +593,7 @@ function App() {
           <div className={`video-stage${videoUrl ? ' has-video' : ''}`} data-ratio={previewAspectRatio} style={{ aspectRatio: previewAspectRatio.replace(':', ' / ') }}>
             {videoUrl ? <>
               <div className="playback-composition" ref={compositionRef}>
-                <video ref={videoRef} key={videoUrl} src={videoUrl} controls playsInline preload="metadata" />
+                <video ref={videoRef} key={videoUrl} src={mediaUrl(videoUrl)} controls playsInline preload="metadata" />
               </div>
             </> : (
               <div className="paper-preview" data-mode={highlightMode} aria-label="Preview of the warm paper and yellow phrase highlight">
@@ -604,7 +609,7 @@ function App() {
           </div>
           <div className="output-meta">
             <span>{metadata ? `${metadata.duration}s output (${metadata.requested_duration ?? metadata.duration}s at ${metadata.playback_speed ?? 1}×) · ${metadata.article_count} pages · ${metadata.aspect_ratio || aspectRatio} · ${metadata.sfx_id || 'page_turn'}` : `${duration} seconds · ${aspectRatio} video · 2× playback`}</span>
-            {videoUrl ? <a className="download-link" href={videoUrl} download><Icon name="download" size={15} /> DOWNLOAD MP4</a> : <span>H.264 · AAC SOUND</span>}
+            {videoUrl ? <a className="download-link" href={mediaUrl(videoUrl)} download><Icon name="download" size={15} /> DOWNLOAD MP4</a> : <span>H.264 · AAC SOUND</span>}
           </div>
           {previewSettingsChanged && <div className="settings-changed-note" role="status">
             <span>Settings changed. This preview is the previous export. Create another video to apply your current choices.</span>
@@ -618,7 +623,7 @@ function App() {
             <div className="source-list">
               {sources.map((source, index) => {
                 const isGenerated = source.generated || source.source_kind === 'fictional_fallback';
-                const url = source.thumbnail_url ? (source.thumbnail_url.startsWith('/') ? source.thumbnail_url : `/media/${source.thumbnail_url}`) : '';
+                const url = source.thumbnail_url ? mediaUrl(source.thumbnail_url.startsWith('/') ? source.thumbnail_url : `/media/${source.thumbnail_url}`) : '';
                 return <article className="source-row" key={source.article_id || source.id || `${index}-${source.headline}`}>
                   {url && <img src={url} alt="Article page excerpt" loading="lazy" />}
                   <div className="source-copy">

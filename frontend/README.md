@@ -17,7 +17,7 @@ npm install
 npm run dev -- --host 127.0.0.1
 ```
 
-Vite proxies `/api` and `/media` to `http://127.0.0.1:8000`. Set `VITE_API_ORIGIN` to override that backend address.
+Vite proxies `/api` and `/media` to `http://127.0.0.1:8000` when `VITE_API_ORIGIN` is empty. To use a deployed FastAPI backend during local frontend development, set `VITE_API_ORIGIN` in `.env.development` to the backend origin (without `/api`) and restart Vite. The checked-in local setup targets the current FastAPI Cloud deployment. Set the same variable in the frontend hosting provider before building for production. API calls, generated MP4s, and source thumbnails use this origin.
 
 ## API flow
 
