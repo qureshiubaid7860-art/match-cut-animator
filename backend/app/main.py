@@ -1,19 +1,41 @@
 from __future__ import annotations
 
+import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 
 from . import config
 from .api.routes import router
+from .jobs import recover_jobs, start_render_worker
 
-app = FastAPI(title="MATCH CUT · Documentary Word Highlight Generator", version="1.0.0")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+logger = logging.getLogger("matchcut")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    recover_jobs()
+    start_render_worker()
+    logger.info(
+        "MATCH CUT ready output=%sx%s fps=%s timeout=%ss cors=%s",
+        config.OUTPUT_WIDTH, config.OUTPUT_HEIGHT, config.DEFAULT_FPS, config.RENDER_TIMEOUT, config.CORS_ORIGINS,
+    )
+    yield
+
+
+app = FastAPI(title="MATCH CUT · Documentary Word Highlight Generator", version="1.0.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=config.CORS_ORIGINS or ["*"],
     allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Content-Type"],
@@ -27,9 +49,17 @@ if FRONTEND_ASSETS.is_dir():
     app.mount("/assets", StaticFiles(directory=FRONTEND_ASSETS), name="frontend-assets")
 
 
+@app.exception_handler(RequestValidationError)
+async def validation_error(_request: Request, exception: RequestValidationError):
+    return JSONResponse(status_code=422, content={"detail": exception.errors()})
+
+
 @app.exception_handler(Exception)
-async def safe_unexpected_error(_request, _exception):
-    return JSONResponse(status_code=500, content={"detail": "Something went wrong while processing the request. Check the server console and try again."})
+async def safe_unexpected_error(_request: Request, exception: Exception):
+    if isinstance(exception, HTTPException):
+        raise exception
+    logger.exception("Unhandled server error")
+    return JSONResponse(status_code=500, content={"detail": "Something went wrong while processing the request. Try again in a moment."})
 
 
 @app.get("/", include_in_schema=False)

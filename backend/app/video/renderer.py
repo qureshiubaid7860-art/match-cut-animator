@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import gc
+import logging
+import os
 import shutil
 import subprocess
 import tempfile
+import threading
+import time
 from math import gcd
 from pathlib import Path
 from typing import Callable
@@ -16,20 +21,68 @@ from ..audio.soundscape import SFX_ASSETS, build_audio, canonical_sound_style
 from ..models import Article
 
 PLAYBACK_SPEED = 2.0
+SUPPORTED_IMAGE_FORMATS = {".jpg", ".jpeg", ".png", ".webp"}
+logger = logging.getLogger("matchcut.render")
+
+
+def _rss_mb() -> str:
+    try:
+        with open("/proc/self/status", encoding="utf-8") as status:
+            for line in status:
+                if line.startswith("VmRSS:"):
+                    return f"{int(line.split()[1]) / 1024:.0f}MB"
+    except OSError:
+        pass
+    return "n/a"
 
 
 def ffmpeg_path() -> str:
     if config.FFMPEG_BINARY:
         if Path(config.FFMPEG_BINARY).is_file():
             return config.FFMPEG_BINARY
-        raise RuntimeError(f"FFMPEG_BINARY points to a missing executable: {config.FFMPEG_BINARY}")
+        raise RuntimeError(f"FFmpeg is missing. FFMPEG_BINARY does not point to an executable.")
     system_ffmpeg = shutil.which("ffmpeg")
     if system_ffmpeg:
         return system_ffmpeg
     try:
-        return imageio_ffmpeg.get_ffmpeg_exe()
+        path = imageio_ffmpeg.get_ffmpeg_exe()
+        if os.name != "nt":
+            os.chmod(path, os.stat(path).st_mode | 0o111)
+        return path
     except Exception as exc:
-        raise RuntimeError("FFmpeg is unavailable. Install the project requirements or set FFMPEG_BINARY to an FFmpeg executable.") from exc
+        raise RuntimeError("FFmpeg is unavailable. Install FFmpeg or set FFMPEG_BINARY to an FFmpeg executable.") from exc
+
+
+def validate_articles(articles: list[Article]) -> None:
+    if len(articles) < 3:
+        raise ValueError("At least 3 OCR-confirmed article pages are required to render a match cut.")
+    for article in articles:
+        path = Path(article.path or "")
+        if not path.is_file():
+            raise ValueError(f"{article.filename}: the article image is missing from storage.")
+        if path.stat().st_size < 64:
+            raise ValueError(f"{article.filename}: the article image is empty.")
+        if path.suffix.lower() not in SUPPORTED_IMAGE_FORMATS:
+            raise ValueError(f"{article.filename}: unsupported image format. Use JPG, PNG, or WEBP.")
+        if not article.bbox or len(article.bbox) != 4:
+            raise ValueError(f"{article.filename}: the target-word box is missing or invalid.")
+        try:
+            _x, _y, box_width, box_height = [float(value) for value in article.bbox]
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{article.filename}: the target-word box is invalid.") from exc
+        if box_width < 2 or box_height < 2:
+            raise ValueError(f"{article.filename}: the target-word box is too small to render.")
+        if article.image_width and article.image_height and (article.image_width < 2 or article.image_height < 2):
+            raise ValueError(f"{article.filename}: the article dimensions are invalid.")
+
+
+def _cheap_blur(image: Image.Image, radius: float) -> Image.Image:
+    if radius <= 0:
+        return image
+    scale = max(1, min(12, int(radius / 3.5) or 1))
+    small = image.resize((max(1, image.width // scale), max(1, image.height // scale)), Image.Resampling.BILINEAR)
+    small = small.filter(ImageFilter.GaussianBlur(radius=max(0.6, radius / scale)))
+    return small.resize(image.size, Image.Resampling.BILINEAR)
 
 
 def _prepare_source(article: Article, width: int, height: int):
@@ -38,6 +91,11 @@ def _prepare_source(article: Article, width: int, height: int):
     if not article.bbox:
         raise ValueError(f"{article.filename}: no target word box is available.")
     bbox = [float(value) for value in article.bbox]
+    max_edge = max(width, height) * 2
+    if max(source.size) > max_edge:
+        scale = max_edge / max(source.size)
+        source = source.resize((max(2, round(source.width * scale)), max(2, round(source.height * scale))), Image.Resampling.BILINEAR)
+        bbox = [value * scale for value in bbox]
     bbox[0] = max(0.0, min(bbox[0], source.width - 1.0))
     bbox[1] = max(0.0, min(bbox[1], source.height - 1.0))
     bbox[2] = max(2.0, min(bbox[2], source.width - bbox[0]))
@@ -48,7 +106,7 @@ def _prepare_source(article: Article, width: int, height: int):
         method=Image.Resampling.BILINEAR,
         centering=((bbox[0] + bbox[2] / 2) / source.width, (bbox[1] + bbox[3] / 2) / source.height),
     )
-    background = ImageEnhance.Brightness(background.filter(ImageFilter.GaussianBlur(radius=42))).enhance(0.96)
+    background = ImageEnhance.Brightness(_cheap_blur(background, 42)).enhance(0.96)
     return source, bbox, background
 
 
@@ -138,9 +196,27 @@ def _focus_falloff(frame: Image.Image, box: tuple[float, float, float, float]) -
     )
     mask = Image.new("L", frame.size, 0)
     ImageDraw.Draw(mask).rounded_rectangle(core, radius=max(36, margin_y // 2), fill=255)
-    mask = mask.filter(ImageFilter.GaussianBlur(radius=max(48, round(frame.height * 0.035))))
-    softened = frame.filter(ImageFilter.GaussianBlur(radius=4.2))
+    mask = _cheap_blur(mask, max(48, round(frame.height * 0.035)))
+    softened = _cheap_blur(frame, 4.2)
     return Image.composite(frame, softened, mask)
+
+
+def _compose_page_frame(
+    article: Article,
+    width: int,
+    height: int,
+    target_box: tuple[float, float],
+    highlight_mode: str,
+    caption: str,
+) -> Image.Image:
+    source, bbox, background = _prepare_source(article, width, height)
+    try:
+        reveal = 1.0 if highlight_mode == "default" else 0.0
+        frame = _make_frame(source, bbox, background, width, height, target_box, highlight_mode, reveal)
+        return _draw_caption(frame, caption)
+    finally:
+        source.close()
+        background.close()
 
 
 def _make_frame(
@@ -263,6 +339,18 @@ def _sound_style(requested: str, articles: list[Article]) -> str:
     return canonical_sound_style("documentary")
 
 
+def _drain_stderr(stream, chunks: list[bytes]) -> None:
+    try:
+        while True:
+            piece = stream.read(4096)
+            if not piece:
+                break
+            if sum(len(item) for item in chunks) < 8000:
+                chunks.append(piece)
+    except OSError:
+        return
+
+
 def render_video(
     articles: list[Article], output_path: str | Path, duration: float = 10.0, fps: int = 30,
     width: int = 1080, height: int = 1920, sfx_enabled: bool = True, background_enabled: bool = True,
@@ -270,8 +358,7 @@ def render_video(
     target_word: str = "", progress: Callable[[int, str], None] | None = None,
     sfx_id: str = "click", aspect_ratio: str | None = None, highlight_mode: str = "highlight",
 ) -> dict:
-    if len(articles) < 3:
-        raise ValueError("At least 3 OCR-confirmed article pages are required to render a match cut.")
+    validate_articles(articles)
     if width % 2 or height % 2:
         raise ValueError("The output width and height must be even numbers for H.264 encoding.")
     if sfx_id != "none" and sfx_id not in SFX_ASSETS:
@@ -287,49 +374,91 @@ def render_video(
     fps = max(24, min(int(fps), 60))
     output_duration = duration / PLAYBACK_SPEED
     total_frames = round(output_duration * fps)
-    sources = [_prepare_source(article, width, height) for article in articles]
+    logger.info(
+        "render start articles=%s size=%sx%s fps=%s frames=%s duration=%s rss=%s",
+        len(articles), width, height, fps, total_frames, duration, _rss_mb(),
+    )
     boundaries = [round(index * total_frames / len(articles)) for index in range(len(articles) + 1)]
     cut_frames = boundaries[1:-1]
     selected_style = _sound_style(sound_style, articles)
     target_boxes = [
-        _target_box_for_page(bbox, target_word, width, height, index)
-        for index, (_, bbox, _) in enumerate(sources)
+        _target_box_for_page([float(value) for value in article.bbox], target_word, width, height, index)
+        for index, article in enumerate(articles)
     ]
-    page_frames = []
-    for (source, bbox, background), target_box in zip(sources, target_boxes):
-        frame = _make_frame(source, bbox, background, width, height, target_box, highlight_mode, 0.0)
-        page_frames.append(_draw_caption(frame, caption))
-
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="matchcut-") as temp_dir:
+    work_dir = Path(config.WORK_DIR)
+    work_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="matchcut-", dir=work_dir) as temp_dir:
         audio_path = Path(temp_dir) / "sound-design.wav"
         if progress:
             progress(0, "Building the frame-locked sound timeline")
+        logger.info("audio start rss=%s", _rss_mb())
         build_audio(
             audio_path, output_duration, fps, cut_frames, sfx_enabled, background_enabled,
             sfx_volume, background_volume, selected_style, sfx_id=sfx_id,
         )
+        logger.info("audio done bytes=%s rss=%s", audio_path.stat().st_size, _rss_mb())
+        encoder = ffmpeg_path()
         command = [
-            ffmpeg_path(), "-hide_banner", "-loglevel", "error", "-y",
+            encoder, "-hide_banner", "-loglevel", "error", "-y",
             "-f", "rawvideo", "-vcodec", "rawvideo", "-pix_fmt", "rgb24",
             "-s", f"{width}x{height}", "-r", str(fps), "-i", "pipe:0",
             "-i", str(audio_path), "-map", "0:v:0", "-map", "1:a:0",
             "-frames:v", str(total_frames), "-t", f"{output_duration:.4f}",
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
-            "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(output_path),
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "20", "-pix_fmt", "yuv420p",
+            "-threads", "1", "-x264-params", "threads=1:sliced-threads=0",
+            "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", str(output_path),
         ]
-        process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        logger.info("ffmpeg start cmd=%s rss=%s", " ".join(command), _rss_mb())
+        process = subprocess.Popen(
+            command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            bufsize=1024 * 1024,
+        )
+        stderr_chunks: list[bytes] = []
+        stderr_thread = threading.Thread(target=_drain_stderr, args=(process.stderr, stderr_chunks), daemon=True)
+        stderr_thread.start()
+        page_frame = None
+        loaded_index = -1
+        deadline = time.monotonic() + config.RENDER_TIMEOUT
         try:
             assert process.stdin is not None
             article_index = 0
             for frame_index in range(total_frames):
+                if time.monotonic() > deadline:
+                    raise TimeoutError(f"Video rendering timed out after {int(config.RENDER_TIMEOUT)} seconds.")
+                if process.poll() is not None:
+                    message = b"".join(stderr_chunks).decode("utf-8", errors="replace").strip()
+                    raise RuntimeError(f"FFmpeg stopped while frames were still being written. {message[:700]}".strip())
                 while article_index + 1 < len(articles) and frame_index >= boundaries[article_index + 1]:
                     article_index += 1
+                if article_index != loaded_index:
+                    if page_frame is not None:
+                        page_frame.close()
+                        page_frame = None
+                        gc.collect()
+                    logger.info(
+                        "page %s/%s file=%s dims=%sx%s rss=%s",
+                        article_index + 1, len(articles), articles[article_index].filename,
+                        articles[article_index].image_width, articles[article_index].image_height, _rss_mb(),
+                    )
+                    if progress:
+                        progress(
+                            round(article_index / max(len(articles), 1) * 100),
+                            f"Preparing page {article_index + 1} of {len(articles)}",
+                        )
+                    page_frame = _compose_page_frame(
+                        articles[article_index], width, height, target_boxes[article_index],
+                        highlight_mode, caption,
+                    )
+                    loaded_index = article_index
                 page_start, page_end = boundaries[article_index], boundaries[article_index + 1]
                 page_progress = (frame_index - page_start) / max(1, page_end - page_start - 1)
                 timeline_progress = _timeline_progress(frame_index, total_frames)
-                frame = page_frames[article_index].copy()
+                frame = page_frame.copy()
                 target_box = target_boxes[article_index]
                 screen_box = (
                     (width - target_box[0]) / 2,
@@ -337,36 +466,42 @@ def render_video(
                     (width + target_box[0]) / 2,
                     (height + target_box[1]) / 2,
                 )
-                if highlight_mode == "default":
-                    _draw_marker(frame, screen_box, 1.0)
-                elif highlight_mode == "highlight":
+                if highlight_mode == "highlight":
                     _draw_marker(frame, screen_box, timeline_progress)
-                else:
+                elif highlight_mode == "underline":
                     _draw_underline(frame, screen_box, timeline_progress)
                 frame = _zoom_frame(frame, 1.0 + 0.045 * page_progress)
-                process.stdin.write(np.asarray(frame, dtype=np.uint8).tobytes())
+                process.stdin.write(frame.tobytes("raw", "RGB"))
+                frame.close()
                 if progress and (frame_index % max(1, fps // 2) == 0 or frame_index + 1 == total_frames):
                     progress(round((frame_index + 1) / total_frames * 100), f"Rendered frame {frame_index + 1} of {total_frames}")
             process.stdin.close()
-            stderr = process.stderr.read() if process.stderr else b""
-            if process.stderr:
-                process.stderr.close()
-            return_code = process.wait()
+            return_code = process.wait(timeout=max(15.0, config.RENDER_TIMEOUT / 6))
         except BaseException:
             if process.poll() is None:
                 process.kill()
-            process.wait()
-            if process.stderr:
-                process.stderr.close()
+            try:
+                process.wait(timeout=8)
+            except subprocess.TimeoutExpired:
+                process.kill()
             output_path.unlink(missing_ok=True)
             raise
+        finally:
+            if page_frame is not None:
+                page_frame.close()
+            stderr_thread.join(timeout=5)
+            if process.stderr:
+                process.stderr.close()
+        stderr = b"".join(stderr_chunks).decode("utf-8", errors="replace").strip()
+        logger.info("ffmpeg exit code=%s stderr=%s rss=%s", return_code, stderr[:500], _rss_mb())
         if return_code != 0:
-            message = stderr.decode("utf-8", errors="replace").strip()
             output_path.unlink(missing_ok=True)
-            raise RuntimeError(f"FFmpeg could not render the video. {message[:700]}")
+            detail = stderr[:700] or "FFmpeg exited without writing an error message."
+            raise RuntimeError(f"FFmpeg could not render the video. {detail}")
     if not output_path.is_file() or output_path.stat().st_size < 1_024:
         output_path.unlink(missing_ok=True)
         raise RuntimeError("FFmpeg completed but the MP4 is missing or empty.")
+    logger.info("mp4 ready path=%s bytes=%s rss=%s", output_path, output_path.stat().st_size, _rss_mb())
     return {
         "width": width,
         "height": height,

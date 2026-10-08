@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 import uuid
 from datetime import datetime, timezone
@@ -8,18 +9,20 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 import httpx
-from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
 
 from .. import config
-from ..jobs import make_job, set_progress
+from ..jobs import enqueue_generation, job_from_payload, job_path, make_job, register_generation_handler, set_progress
 from ..models import ARTICLES, JOBS, SESSIONS, Job
 from ..ocr.engine import normalized_terms
 from ..services.analysis import analyze_articles
 from ..services.acquisition import acquire_sources, order_for_match_cuts
 from ..services.demo import create_demo
 from ..services.storage import add_upload, create_session, session_articles
-from ..video.renderer import render_video
+from ..video.renderer import render_video, validate_articles
+
+logger = logging.getLogger("matchcut.api")
 
 router = APIRouter(prefix="/api")
 
@@ -145,6 +148,9 @@ def health():
         "auto_search_configured": True,
         "auto_search_provider": "GDELT DOC",
         "supported_formats": ["jpg", "jpeg", "png", "webp", "pdf"],
+        "output": {"width": config.OUTPUT_WIDTH, "height": config.OUTPUT_HEIGHT, "fps": config.DEFAULT_FPS, "duration": config.DEFAULT_DURATION},
+        "render_timeout": config.RENDER_TIMEOUT,
+        "max_concurrent_renders": config.MAX_CONCURRENT_RENDERS,
     }
 
 
@@ -228,8 +234,29 @@ def analyze(request: AnalyzeRequest):
     return _analysis_payload(request.upload_id, target_word, articles)
 
 
+def _safe_error(exc: BaseException) -> str:
+    message = str(exc).strip() or exc.__class__.__name__
+    lowered = message.lower()
+    if any(token in lowered for token in ("api_key", "token=", "password", "secret", "authorization")):
+        return "Video generation failed because a configured service rejected the request."
+    if "memory" in lowered or "killed" in lowered:
+        return "The server ran out of memory while rendering. Try fewer pages or a shorter duration, then generate again."
+    if isinstance(exc, TimeoutError) or "timed out" in lowered:
+        return "Video rendering timed out. Try a shorter duration or fewer pages, then generate again."
+    if "ffmpeg" in lowered and "unavailable" in lowered:
+        return "FFmpeg is not available on the server, so the MP4 cannot be encoded."
+    if "job not found" in lowered or "restarted" in lowered:
+        return "The server restarted during rendering. Please generate the video again."
+    return message[:500]
+
+
 def _generation_worker(job: Job, request: GenerateRequest) -> None:
     try:
+        logger.info(
+            "job=%s generate start word=%s pages=%s ratio=%s duration=%s fps=%s size=%sx%s sfx=%s highlight=%s",
+            job.id, request.target_word, request.number_of_articles, request.aspect_ratio,
+            request.duration, request.fps, request.width, request.height, request.sfx_id, request.highlight_mode,
+        )
         word = _target(request.target_word)
         if request.upload_id:
             session = SESSIONS.get(request.upload_id)
@@ -261,6 +288,12 @@ def _generation_worker(job: Job, request: GenerateRequest) -> None:
         if len(matches) < 3:
             raise ValueError(f"Found “{word}” in {len(matches)} images. At least 3 readable matches are needed to render a video.")
         matches = matches[:request.number_of_articles]
+        validate_articles(matches)
+        logger.info(
+            "job=%s articles=%s dims=%s",
+            job.id, len(matches),
+            [(article.image_width, article.image_height, article.filename) for article in matches],
+        )
         set_progress(job, "05 — Selecting Best Matches", 52, f"Ranking OCR clarity and target-word framing across {len(matches)} pages")
         set_progress(job, "06 — Building Match Cut Timeline", 60, "Locking the word to one shared screen position and scale")
         set_progress(job, "07 — Designing Sound", 67, f"Preparing the {request.sfx_id} sound effect and {request.sound_style} background")
@@ -317,35 +350,45 @@ def _generation_worker(job: Job, request: GenerateRequest) -> None:
         job.video_path = str(output_path)
         job.metadata = metadata
         job.sources = sources
+        logger.info("job=%s complete bytes=%s url=/media/output/%s.mp4", job.id, output_path.stat().st_size, job.id)
         set_progress(job, "09 — Finalizing MP4", 100, "MP4 is ready to preview and download", "complete")
     except Exception as exc:
-        message = str(exc).strip()
-        if not message or "Traceback" in message:
-            message = "Video generation failed. Check the images, then try again."
-        job.error = message[:500]
+        logger.exception("job=%s generate failed", job.id)
+        job.error = _safe_error(exc)
         set_progress(job, "09 — Finalizing MP4", max(job.percent, 1), job.error, "failed")
 
 
+register_generation_handler(_generation_worker)
+
+
 @router.post("/generate")
-def generate(request: GenerateRequest, background_tasks: BackgroundTasks):
+def generate(request: GenerateRequest):
     if request.upload_id:
         _valid_session(request.upload_id)
     _target(request.target_word)
     job_id = uuid.uuid4().hex
     job = make_job(job_id, request.upload_id or "", request.target_word.strip())
     JOBS[job_id] = job
-    background_tasks.add_task(_generation_worker, job, request)
+    try:
+        enqueue_generation(job, request)
+    except RuntimeError as exc:
+        JOBS.pop(job_id, None)
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
     return {"job_id": job.id, "status": job.status, "message": "Automatic source search and video generation have started."}
 
 
 @router.post("/demo")
-def demo(background_tasks: BackgroundTasks, duration: float = 10.0):
+def demo(duration: float = 10.0):
     upload_id, articles = create_demo()
     job_id = uuid.uuid4().hex
     request = GenerateRequest(upload_id=upload_id, target_word="NASA", duration=duration)
     job = make_job(job_id, upload_id, "NASA")
     JOBS[job_id] = job
-    background_tasks.add_task(_generation_worker, job, request)
+    try:
+        enqueue_generation(job, request)
+    except RuntimeError as exc:
+        JOBS.pop(job_id, None)
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
     return {
         "job_id": job.id,
         "upload_id": upload_id,
@@ -356,27 +399,34 @@ def demo(background_tasks: BackgroundTasks, duration: float = 10.0):
     }
 
 
+def _load_job(job_id: str) -> Job:
+    job = JOBS.get(job_id)
+    if job:
+        return job
+    path = job_path(job_id)
+    if path.is_file():
+        try:
+            job = job_from_payload(json.loads(path.read_text(encoding="utf-8")))
+            JOBS[job.id] = job
+            return job
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            logger.exception("Could not read persisted job %s", job_id)
+    raise HTTPException(status_code=404, detail="Generation job not found or the server has restarted. Please generate the video again.")
+
+
 @router.get("/progress/{job_id}")
 def progress(job_id: str):
-    job = JOBS.get(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Generation job not found or the server has restarted.")
-    return job.public_progress()
+    return _load_job(job_id).public_progress()
 
 
 @router.get("/result/{job_id}")
 def result(job_id: str):
-    job = JOBS.get(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Generation job not found or the server has restarted.")
-    return job.public_result()
+    return _load_job(job_id).public_result()
 
 
 @router.get("/sources/{job_id}")
 def sources(job_id: str):
-    job = JOBS.get(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Generation job not found or the server has restarted.")
+    job = _load_job(job_id)
     return {"job_id": job.id, "sources": job.sources}
 
 

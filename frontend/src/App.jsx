@@ -56,13 +56,16 @@ async function apiRequest(path, options = {}) {
   try {
     response = await fetch(`${API}${path}`, { credentials: 'same-origin', ...options });
   } catch {
-    throw new Error('The MATCH CUT service is unreachable. Start the backend and try again.');
+    throw new Error('The MATCH CUT service is unreachable. Check your connection and try again.');
   }
   const type = response.headers.get('content-type') || '';
   const payload = type.includes('application/json') ? await response.json() : await response.text();
   if (!response.ok) {
+    if (response.status === 429) {
+      throw new Error(typeof payload === 'object' ? payload?.detail || 'Another video is already rendering. Wait for it to finish, then try again.' : payload);
+    }
     if (response.status === 502 && !type.includes('application/json')) {
-      throw new Error('The service could not finish this video. Check that the backend is running, then try again.');
+      throw new Error('The service could not finish this video. Please try again in a moment.');
     }
     const message = typeof payload === 'object' ? payload?.detail || payload?.message || payload?.error : payload;
     throw new Error(message || `Request failed (${response.status}).`);
@@ -80,6 +83,7 @@ function sourceHost(url) {
 }
 
 function progressCopy(job) {
+  if (job?.stage) return job.stage.replace(/^\d+\s+—\s+/, '');
   if (!job || job.status === 'queued') return 'Getting started…';
   const percent = Number(job.percent || 0);
   if (percent < 20) return 'Looking for pages…';
@@ -210,7 +214,7 @@ function App() {
     apiRequest('/api/capabilities').then((result) => {
       if (active) setServiceNote(result.auto_search_configured ? 'Public pages are checked first; generated pages are labeled.' : 'Automatic page search is unavailable.');
     }).catch(() => {
-      if (active) setServiceNote('Start the local service to make a video.');
+      if (active) setServiceNote('Public page search could not be confirmed yet. You can still try generating.');
     });
     return () => { active = false; };
   }, []);
@@ -279,7 +283,7 @@ function App() {
         window.localStorage.removeItem('matchcut.activeJobId');
         window.localStorage.removeItem('matchcut.lastJobId');
         window.localStorage.removeItem('matchcut.jobSettings');
-        throw new Error(progress.error || progress.message || 'The video could not be completed.');
+        throw new Error(progress.error || progress.message || 'Video rendering failed.');
       }
       if (progress.status === 'complete') {
         const [result, sourceResult] = await Promise.all([
@@ -308,6 +312,7 @@ function App() {
   }
 
   async function beginGeneration() {
+    if (busy) return;
     setWordError('');
     setError('');
     setBusy(true);
@@ -356,6 +361,7 @@ function App() {
 
   async function generate(event) {
     event?.preventDefault();
+    if (busy || adBusy) return;
     const phrase = targetWord.trim();
     const words = phrase.match(/[^\W_]+/gu) || [];
     if (!phrase || words.length > 4) {
@@ -566,7 +572,7 @@ function App() {
               </div>
             </details>
 
-            {!completed && <button className="generate-button" type="submit" disabled={busy || adBusy || !targetWord.trim()}>
+            {!completed && <button className="generate-button" type="submit" disabled={busy || adBusy || isGenerating || !targetWord.trim()}>
               <span>{isGenerating ? 'Generating...' : adBusy ? 'Checking ad availability…' : 'Generate Match Cut'}</span>
               <span className={`button-icon${busy ? ' spinning' : ''}`}><Icon name={busy ? 'spinner' : 'arrow'} size={19} /></span>
             </button>}
