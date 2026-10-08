@@ -470,7 +470,7 @@ def render_video(
                     _draw_marker(frame, screen_box, timeline_progress)
                 elif highlight_mode == "underline":
                     _draw_underline(frame, screen_box, timeline_progress)
-                frame = _zoom_frame(frame, 1.0 + 0.045 * page_progress)
+                # frame = _zoom_frame(frame, 1.0 + 0.045 * page_progress)
                 process.stdin.write(frame.tobytes("raw", "RGB"))
                 frame.close()
                 if progress and (frame_index % max(1, fps // 2) == 0 or frame_index + 1 == total_frames):
