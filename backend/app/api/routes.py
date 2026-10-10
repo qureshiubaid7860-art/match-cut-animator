@@ -428,11 +428,12 @@ def result(job_id: str):
 @router.get("/download/{job_id}")
 def download(job_id: str):
     job = _load_job(job_id)
-    if not getattr(job, 'video_path', None):
-        raise HTTPException(status_code=404, detail="Video not found")
+    # Ensure the job has completed rendering and the video file exists and is non‑empty
+    if job.status != "complete" or not getattr(job, "video_path", None):
+        raise HTTPException(status_code=404, detail="Video not ready")
     path = Path(job.video_path)
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail="File missing")
+    if not path.is_file() or path.stat().st_size < 1024:
+        raise HTTPException(status_code=404, detail="Video file missing or incomplete")
     return FileResponse(path, media_type="video/mp4", filename=f"{job_id}.mp4")
 
 @router.get("/sources/{job_id}")
