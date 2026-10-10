@@ -1,0 +1,16 @@
+Metadata-Version: 2.4
+Name: match-cut-animator
+Version: 0.1.0
+Summary: Match Cut Animator API
+Requires-Python: >=3.11
+Requires-Dist: fastapi[standard]<1.0,>=0.115
+Requires-Dist: uvicorn[standard]<1.0,>=0.30
+Requires-Dist: python-multipart>=0.0.9
+Requires-Dist: pillow<12.0,>=10.4
+Requires-Dist: rapidocr<4.0,>=3.3
+Requires-Dist: onnxruntime<2.0,>=1.20
+Requires-Dist: numpy<3.0,>=2.0
+Requires-Dist: pymupdf<2.0,>=1.24
+Requires-Dist: imageio-ffmpeg<1.0,>=0.5.1
+Requires-Dist: httpx<1.0,>=0.27
+Requires-Dist: python-dotenv<2.0,>=1.0
