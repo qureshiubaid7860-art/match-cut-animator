@@ -10,6 +10,7 @@ from typing import Annotated, Literal
 
 import httpx
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .. import config
@@ -424,6 +425,16 @@ def result(job_id: str):
     return _load_job(job_id).public_result()
 
 
+@router.get("/download/{job_id}")
+def download(job_id: str):
+    job = _load_job(job_id)
+    if not getattr(job, 'video_path', None):
+        raise HTTPException(status_code=404, detail="Video not found")
+    path = Path(job.video_path)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="File missing")
+    return FileResponse(path, media_type="video/mp4", filename=f"{job_id}.mp4")
+
 @router.get("/sources/{job_id}")
 def sources(job_id: str):
     job = _load_job(job_id)
@@ -467,3 +478,4 @@ def search(request: SearchRequest):
         raise HTTPException(status_code=502, detail=f"Automatic source acquisition failed: {str(exc)[:220]}") from exc
     payload = _analysis_payload(session.id, word, added)
     return {**payload, "provider": "GDELT DOC with fictional-page fallback", "source_count": len(added)}
+from fastapi.responses import FileResponse

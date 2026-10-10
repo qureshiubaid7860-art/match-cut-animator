@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import rewardedAdService, { isRewardedAdGateEnabled } from './services/rewardedAd.js';
 
 const API = (import.meta.env.VITE_API_ORIGIN || '').replace(/\/+$/, '');
@@ -615,7 +615,7 @@ function App() {
           </div>
           <div className="output-meta">
             <span>{metadata ? `${metadata.duration}s output (${metadata.requested_duration ?? metadata.duration}s at ${metadata.playback_speed ?? 1}×) · ${metadata.article_count} pages · ${metadata.aspect_ratio || aspectRatio} · ${metadata.sfx_id || 'page_turn'}` : `${duration} seconds · ${aspectRatio} video · 2× playback`}</span>
-            {videoUrl ? <a className="download-link" href={mediaUrl(videoUrl)} download><Icon name="download" size={15} /> DOWNLOAD MP4</a> : <span>H.264 · AAC SOUND</span>}
+            {videoUrl ? <a className="download-link" href={`/api/download/${job?.id}`} download><Icon name="download" size={15} /> DOWNLOAD MP4</a> : <span>H.264 · AAC SOUND</span>}
           </div>
           {previewSettingsChanged && <div className="settings-changed-note" role="status">
             <span>Settings changed. This preview is the previous export. Create another video to apply your current choices.</span>

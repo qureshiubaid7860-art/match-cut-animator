@@ -222,58 +222,22 @@ def _draw_marker(
     box: tuple[float, float, float, float],
     reveal_fraction: float = 1.0,
 ) -> Image.Image:
-    """Lay an organic yellow pigment stroke behind dark printed letterforms."""
-
-    reveal_fraction = max(
-        0.0,
-        min(1.0, reveal_fraction),
-    )
-
+    """Lay a clean, authentic vibrant yellow highlighter stroke across the target word."""
+    reveal_fraction = max(0.0, min(1.0, reveal_fraction))
     if reveal_fraction <= 0.0:
         return frame
 
     x1, y1, x2, y2 = box
+    word_width = max(2.0, x2 - x1)
+    word_height = max(2.0, y2 - y1)
 
-    word_width = max(
-        2.0,
-        x2 - x1,
-    )
+    pad_x = max(6, round(word_height * 0.14))
+    pad_y = max(3, round(word_height * 0.08))
 
-    word_height = max(
-        2.0,
-        y2 - y1,
-    )
-
-    pad_x = max(
-        8,
-        round(word_width * 0.055),
-    )
-
-    stroke_width = max(
-        12,
-        round(word_width + pad_x * 2),
-    )
-
-    stroke_height = max(
-        8,
-        round(word_height * 0.76),
-    )
-
-    left = round(x1 - pad_x)
-    top = round(y1 + word_height * 0.12)
-
-    right = min(
-        frame.width,
-        left + stroke_width,
-    )
-
-    bottom = min(
-        frame.height,
-        top + stroke_height,
-    )
-
-    left = max(0, left)
-    top = max(0, top)
+    left = max(0, round(x1 - pad_x))
+    top = max(0, round(y1 - pad_y))
+    right = min(frame.width, round(x2 + pad_x))
+    bottom = min(frame.height, round(y2 + pad_y))
 
     patch_width = right - left
     patch_height = bottom - top
@@ -281,134 +245,26 @@ def _draw_marker(
     if patch_width < 2 or patch_height < 2:
         return frame
 
-    rng = np.random.default_rng(8197)
+    reveal_width = max(1, min(patch_width, round(patch_width * reveal_fraction)))
 
-    mask = Image.new(
-        "L",
-        (patch_width, patch_height),
-        0,
-    )
+    mask = Image.new("L", (patch_width, patch_height), 0)
+    radius = max(3, min(12, round(patch_height * 0.16)))
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, reveal_width, patch_height), radius=radius, fill=255)
+    mask = mask.filter(ImageFilter.GaussianBlur(radius=0.75))
 
-    brush = ImageDraw.Draw(mask)
+    mask_values = np.asarray(mask, dtype=np.float32) / 255.0
 
-    knots = max(
-        8,
-        min(18, round(patch_width / 28)),
-    )
+    original = frame.crop((left, top, right, bottom))
+    pixels = np.asarray(original, dtype=np.float32)
 
-    upper = []
-    lower = []
+    # Authentic documentary highlighter: vibrant translucent yellow multiply blend
+    yellow_tint = np.array([255.0, 226.0, 38.0], dtype=np.float32) / 255.0
+    highlighted = np.clip(pixels * yellow_tint * 0.90 + pixels * 0.10 * yellow_tint, 0.0, 255.0)
 
-    for index in range(knots + 1):
-        x = index * (patch_width - 1) / knots
+    blended = pixels * (1.0 - mask_values[:, :, None]) + highlighted * mask_values[:, :, None]
+    result = Image.fromarray(np.clip(blended, 0.0, 255.0).astype(np.uint8))
 
-        jitter_top = float(
-            rng.uniform(-0.10, 0.09)
-        )
-
-        jitter_bottom = float(
-            rng.uniform(-0.10, 0.10)
-        )
-
-        upper.append(
-            (
-                x,
-                max(
-                    0,
-                    min(
-                        patch_height - 1,
-                        patch_height * (0.18 + jitter_top),
-                    ),
-                ),
-            )
-        )
-
-        lower.append(
-            (
-                x,
-                max(
-                    0,
-                    min(
-                        patch_height - 1,
-                        patch_height * (0.82 + jitter_bottom),
-                    ),
-                ),
-            )
-        )
-
-    brush.polygon(
-        upper + list(reversed(lower)),
-        fill=255,
-    )
-
-    mask = mask.filter(
-        ImageFilter.GaussianBlur(radius=0.65)
-    )
-
-    mask_values = np.asarray(
-        mask,
-        dtype=np.float32,
-    )
-
-    reveal_width = round(
-        patch_width * reveal_fraction
-    )
-
-    mask_values[:, reveal_width:] = 0
-
-    texture = rng.uniform(
-        0.78,
-        1.0,
-        size=mask_values.shape,
-    ).astype(np.float32)
-
-    original = frame.crop(
-        (left, top, right, bottom)
-    )
-
-    pixels = np.asarray(
-        original,
-        dtype=np.float32,
-    )
-
-    luminance = (
-        pixels[..., 0] * 0.2126
-        + pixels[..., 1] * 0.7152
-        + pixels[..., 2] * 0.0722
-    )
-
-    ink_protection = np.clip(
-        (luminance - 18.0) / 74.0,
-        0.0,
-        1.0,
-    )
-
-    alpha = np.clip(
-        mask_values
-        * texture
-        * 0.82
-        * ink_protection,
-        0,
-        255,
-    ).astype(np.uint8)
-
-    marker_alpha = Image.fromarray(alpha)
-
-    color = Image.new(
-        "RGB",
-        (patch_width, patch_height),
-        (249, 224, 40),
-    )
-
-    frame.paste(
-        Image.composite(
-            color,
-            original,
-            marker_alpha,
-        ),
-        (left, top),
-    )
-
+    frame.paste(result, (left, top))
     return frame
 
 
@@ -468,17 +324,15 @@ def _focus_falloff(
     box: tuple[float, float, float, float],
 ) -> Image.Image:
     """Keep the phrase and nearby article lines sharp; soften the outer crop."""
-
     x1, y1, x2, y2 = box
 
     margin_x = max(
-        96,
-        round((x2 - x1) * 0.22),
+        round(frame.width * 0.38),
+        round((x2 - x1) * 1.2),
     )
-
     margin_y = max(
-        130,
-        round((y2 - y1) * 1.45),
+        round(frame.height * 0.28),
+        round((y2 - y1) * 2.2),
     )
 
     core = (
@@ -502,12 +356,12 @@ def _focus_falloff(
 
     mask = _cheap_blur(
         mask,
-        max(48, round(frame.height * 0.035)),
+        max(48, round(frame.height * 0.045)),
     )
 
     softened = _cheap_blur(
         frame,
-        4.2,
+        3.5,
     )
 
     return Image.composite(
@@ -584,16 +438,10 @@ def _make_frame(
         1.0,
     )
 
-    left = (
-        word_cx
-        - width / scale_x / 2
-    )
-
-    top = (
-        word_cy
-        - height / scale_y / 2
-    )
-
+    # Compute source region offsets to center the target word. No clamping; out‑of‑bounds area will be filled with black.
+    left = word_cx - width / (2 * scale_x)
+    top = word_cy - height / (2 * scale_y)
+    # Off‑screen offsets are allowed; PIL will fill with the background color via fillcolor.
     affine = (
         1 / scale_x,
         0,
@@ -624,6 +472,11 @@ def _make_frame(
     )
 
     frame = background.copy()
+
+    # Subtle drop shadow behind the source page
+    shadow_mask = source_mask.filter(ImageFilter.GaussianBlur(radius=5.0))
+    shadow_layer = Image.new("RGB", (width, height), (30, 28, 24))
+    frame = Image.composite(frame, shadow_layer, ImageOps.invert(shadow_mask))
 
     frame.paste(
         visible,
@@ -1064,12 +917,10 @@ def render_video(
         articles,
     )
 
+    # Compute per-page target boxes (width, height) for each article
     target_boxes = [
         _target_box_for_page(
-            [
-                float(value)
-                for value in article.bbox
-            ],
+            [float(value) for value in article.bbox],
             target_word,
             width,
             height,
@@ -1077,6 +928,13 @@ def render_video(
         )
         for index, article in enumerate(articles)
     ]
+
+    # Use a common target box (max width & height) so the highlighted word stays centered consistently across all pages
+    max_width = max(tb[0] for tb in target_boxes)
+    max_height = max(tb[1] for tb in target_boxes)
+    common_target_box = (max_width, max_height)
+    target_boxes = [common_target_box for _ in articles]
+
 
     output_path = Path(output_path)
     output_path.parent.mkdir(
@@ -1089,13 +947,6 @@ def render_video(
     )
 
     work_dir.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    # DEBUG DIRECTORY
-    debug_dir = Path("debug_frames")
-    debug_dir.mkdir(
         parents=True,
         exist_ok=True,
     )
@@ -1374,55 +1225,10 @@ def render_video(
                         timeline_progress,
                     )
 
-                # Zoom intentionally disabled for this diagnostic test.
-                # Once the blank-frame issue is solved, it can be restored.
-                # frame = _zoom_frame(
-                #     frame,
-                #     1.0 + 0.045 * page_progress,
-                # )
-
-                # ---------------------------------------------------------
-                # DEBUG:
-                # Save the exact frame that is about to enter FFmpeg
-                # at every page transition.
-                # ---------------------------------------------------------
-                if frame_index in cut_frames:
-
-                    debug_path = (
-                        debug_dir
-                        / (
-                            f"cut_{frame_index:04d}"
-                            f"_page_{article_index + 1}.png"
-                        )
-                    )
-
-                    frame.save(
-                        debug_path,
-                        format="PNG",
-                    )
-
-                    logger.info(
-                        "DEBUG cut frame saved: %s",
-                        debug_path,
-                    )
-
-                # Also save the very first frame.
-                if frame_index == 0:
-
-                    debug_path = (
-                        debug_dir
-                        / "frame_0000_page_1.png"
-                    )
-
-                    frame.save(
-                        debug_path,
-                        format="PNG",
-                    )
-
-                    logger.info(
-                        "DEBUG first frame saved: %s",
-                        debug_path,
-                    )
+                frame = _zoom_frame(
+                    frame,
+                    1.0 + 0.045 * page_progress,
+                )
 
                 # ---------------------------------------------------------
                 # Send EXACT RGB24 bytes to FFmpeg.

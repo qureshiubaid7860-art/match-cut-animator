@@ -22,3 +22,8 @@ entrypoint = "backend.app.main:app"
 
 [tool.setuptools.packages.find]
 include = ["backend*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["backend/tests"]
+

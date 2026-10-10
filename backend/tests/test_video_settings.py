@@ -15,7 +15,7 @@ from backend.app.audio.soundscape import SFX_ASSETS, _SFX_DIRECTORY, _read_sfx, 
 from backend.app.models import Article
 from backend.app.services.acquisition import _PAGE_FONT_FAMILIES, _fictional_page, order_for_match_cuts
 from backend.app.services.demo import _generate_page
-from backend.app.video.renderer import PLAYBACK_SPEED, _draw_marker, _draw_underline, _make_frame, _target_box_for_page, _timeline_progress, _zoom_frame, render_video
+from backend.app.video.renderer import PLAYBACK_SPEED, _draw_marker, _draw_underline, _make_frame, _target_box_for_page, _timeline_progress, _zoom_frame, render_video, validate_articles
 
 
 class AspectRatioTests(unittest.TestCase):
@@ -319,5 +319,90 @@ class SoundEffectTests(unittest.TestCase):
         self.assertEqual(GenerateRequest(target_word="NASA", sfx_id="none").sfx_id, "none")
 
 
+class RegressionPipelineTests(unittest.TestCase):
+    def test_render_all_aspect_ratios_generate_valid_mp4(self):
+        with tempfile.TemporaryDirectory() as directory:
+            articles = []
+            for index in range(3):
+                img_path = Path(directory) / f"page_{index}.jpg"
+                Image.new("RGB", (300, 400), (245, 242, 230)).save(img_path)
+                articles.append(Article(
+                    id=f"art_{index}", upload_id="sess", filename=img_path.name,
+                    path=str(img_path), thumbnail_path="", bbox=[50, 100, 80, 30],
+                    found=True, confidence=0.95, image_width=300, image_height=400,
+                ))
+            # Test each supported ratio
+            for ratio, (w, h) in ASPECT_DIMENSIONS.items():
+                with self.subTest(ratio=ratio):
+                    out_path = Path(directory) / f"output_{ratio.replace(':', '_')}.mp4"
+                    meta = render_video(
+                        articles, out_path, duration=3, fps=24, width=w, height=h,
+                        sfx_enabled=False, background_enabled=False, target_word="NASA",
+                        sfx_id="none", aspect_ratio=ratio, highlight_mode="default",
+                    )
+                    self.assertTrue(out_path.is_file())
+                    self.assertGreater(out_path.stat().st_size, 1000)
+                    self.assertEqual(meta["width"], w)
+                    self.assertEqual(meta["height"], h)
+                    self.assertEqual(meta["aspect_ratio"], ratio)
+
+    def test_render_all_highlight_modes_generate_valid_mp4(self):
+        with tempfile.TemporaryDirectory() as directory:
+            articles = []
+            for index in range(3):
+                img_path = Path(directory) / f"page_{index}.jpg"
+                Image.new("RGB", (300, 400), (245, 242, 230)).save(img_path)
+                articles.append(Article(
+                    id=f"art_{index}", upload_id="sess", filename=img_path.name,
+                    path=str(img_path), thumbnail_path="", bbox=[50, 100, 80, 30],
+                    found=True, confidence=0.95, image_width=300, image_height=400,
+                ))
+            for mode in ("default", "highlight", "underline"):
+                with self.subTest(mode=mode):
+                    out_path = Path(directory) / f"mode_{mode}.mp4"
+                    meta = render_video(
+                        articles, out_path, duration=3, fps=24, width=160, height=240,
+                        sfx_enabled=False, background_enabled=False, target_word="NASA",
+                        sfx_id="none", aspect_ratio="2:3", highlight_mode=mode,
+                    )
+                    self.assertTrue(out_path.is_file())
+                    self.assertEqual(meta["highlight_mode"], mode)
+
+    def test_validate_articles_error_conditions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            img_path = Path(directory) / "page.jpg"
+            Image.new("RGB", (200, 200), "white").save(img_path)
+            valid_art = Article(
+                id="1", upload_id="s", filename="p.jpg", path=str(img_path),
+                thumbnail_path="", bbox=[10, 10, 50, 20], found=True, confidence=0.9,
+                image_width=200, image_height=200,
+            )
+            # Fewer than 3 articles
+            with self.assertRaises(ValueError) as ctx:
+                validate_articles([valid_art, valid_art])
+            self.assertIn("At least 3", str(ctx.exception))
+
+            # Missing image file
+            missing_art = Article(
+                id="2", upload_id="s", filename="missing.jpg", path=str(Path(directory) / "no.jpg"),
+                thumbnail_path="", bbox=[10, 10, 50, 20], found=True, confidence=0.9,
+                image_width=200, image_height=200,
+            )
+            with self.assertRaises(ValueError) as ctx:
+                validate_articles([valid_art, valid_art, missing_art])
+            self.assertIn("missing from storage", str(ctx.exception))
+
+            # Invalid bbox
+            bad_bbox_art = Article(
+                id="3", upload_id="s", filename="p.jpg", path=str(img_path),
+                thumbnail_path="", bbox=[10, 10], found=True, confidence=0.9,
+                image_width=200, image_height=200,
+            )
+            with self.assertRaises(ValueError) as ctx:
+                validate_articles([valid_art, valid_art, bad_bbox_art])
+            self.assertIn("invalid", str(ctx.exception))
+
+
 if __name__ == "__main__":
     unittest.main()
+

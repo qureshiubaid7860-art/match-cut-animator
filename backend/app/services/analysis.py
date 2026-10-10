@@ -1,10 +1,11 @@
-from __future__ import annotations
-
+import logging
 from pathlib import Path
 from typing import Callable
 
 from ..models import Article
 from ..ocr.engine import analyze_image, write_box_thumbnail
+
+logger = logging.getLogger("matchcut.analysis")
 
 
 def analyze_articles(articles: list[Article], target_word: str, progress: Callable[[int, str], None] | None = None) -> list[Article]:
@@ -23,7 +24,7 @@ def analyze_articles(articles: list[Article], target_word: str, progress: Callab
             article.ocr_error = None
             write_box_thumbnail(article.path, article.thumbnail_path, article.bbox)
         except Exception as exc:
-            print(f"[OCR ERROR] article={article.id} target={target_word!r} path={article.path} error={exc!r}", flush=True)
+            logger.warning("OCR analysis failed article=%s target=%r path=%s error=%s", article.id, target_word, article.path, exc)
             article.found = False
             article.bbox = None
             article.confidence = 0.0

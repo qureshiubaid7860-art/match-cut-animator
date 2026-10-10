@@ -376,40 +376,85 @@ def _page_image(
     headline_y = 218
 
     if is_fiction and target_word and target_word in title:
-        before, after = title.split(target_word, 1)
+        # Fit the complete fictional headline on one line so the
+        # target-word coordinates remain deterministic and valid.
+        available_width = width - margin * 2
 
-        before_bbox = draw.textbbox(
+        font_size = 91 if len(title) < 70 else 76
+
+        while font_size >= 42:
+            candidate_font = _font(
+                font_size,
+                bold=True,
+                family_index=family_index,
+            )
+
+            title_width = draw.textbbox(
+                (0, 0),
+                title,
+                font=candidate_font,
+            )[2]
+
+            if title_width <= available_width:
+                headline_font = candidate_font
+                break
+
+            font_size -= 3
+        else:
+            headline_font = _font(
+                42,
+                bold=True,
+                family_index=family_index,
+            )
+
+        # Draw the complete headline as one line.
+        draw.text(
+            (margin, headline_y),
+            title,
+            font=headline_font,
+            fill=ink,
+        )
+
+        # Calculate the target word position inside that same line.
+        before, target_part, _after = title.partition(target_word)
+
+        before_width = draw.textbbox(
             (0, 0),
             before,
             font=headline_font,
-        )
+        )[2]
+
         target_width = draw.textbbox(
             (0, 0),
-            target_word,
+            target_part,
             font=headline_font,
         )[2]
 
-        target_x = margin + before_bbox[2]
+        target_x = margin + before_width
 
-        # Keep the existing headline appearance.
-        y = _draw_block(
-            draw,
-            title,
-            (margin, headline_y),
-            width - margin * 2,
-            headline_font,
-            ink,
-            spacing=9,
-            max_lines=4,
+        # Clamp bbox so it can never leave the page.
+        target_x = max(
+            float(margin),
+            min(
+                float(target_x),
+                float(width - margin - target_width),
+            ),
         )
 
-        # Exact target bbox in the generated page.
-        target_bbox = [
-            float(target_x),
-            float(headline_y),
+        target_width = min(
             float(target_width),
+            float(width - margin - target_x),
+        )
+
+        target_bbox = [
+            target_x,
+            float(headline_y),
+            target_width,
             float(headline_font.size + 12),
         ]
+
+        y = headline_y + headline_font.size + 12
+
     else:
         y = _draw_block(
             draw,
@@ -421,7 +466,6 @@ def _page_image(
             spacing=9,
             max_lines=4,
         )
-
     draw.text(
         (margin, y + 10),
         source_line[:140],
@@ -865,14 +909,16 @@ def acquire_sources(
             generated.append(article)
         except (ValueError, OSError):
             continue
-        # Fictional pages already contain a deterministic target-word bbox.
-    # Do not run OCR again on these locally generated pages.
+    from ..ocr.engine import write_box_thumbnail
+
     for article in generated:
         source = article.source or {}
         article.analysis_target = target_word
         article.found = bool(source.get("found"))
         article.confidence = float(source.get("confidence") or 1.0)
         article.bbox = source.get("bbox")
+        if article.bbox:
+            write_box_thumbnail(article.path, article.thumbnail_path, article.bbox)
 
     generated_matches = [
         article
