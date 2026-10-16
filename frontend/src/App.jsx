@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import rewardedAdService, { isRewardedAdGateEnabled } from './services/rewardedAd.js';
+import { AdsterraLeaderboardBanner, AdsterraNativeBanner, AdsterraOutOfPageScripts } from './AdBanner.jsx';
 
 const API = (import.meta.env.VITE_API_ORIGIN || '').replace(/\/+$/, '');
 const ASPECT_RATIOS = [
@@ -201,11 +201,6 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [wordError, setWordError] = useState('');
-  const [adDialog, setAdDialog] = useState(null);
-  const [adMessage, setAdMessage] = useState('');
-  const [adBusy, setAdBusy] = useState(false);
-  const adSession = useRef(null);
-  const adRequestId = useRef(0);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedbackForm, setFeedbackForm] = useState({ rating: '5', issueType: 'Feature request', message: '' });
   const [feedbackStatus, setFeedbackStatus] = useState('');
@@ -472,7 +467,7 @@ function App() {
 
   async function generate(event) {
     event?.preventDefault();
-    if (busy || adBusy || (adDialog && adDialog !== 'unavailable')) return;
+    if (busy) return;
     const phrase = targetWord.trim();
     const words = phrase.match(/[^\W_]+/gu) || [];
     if (!phrase || words.length > 4) {
@@ -481,74 +476,7 @@ function App() {
     }
 
     setError('');
-    if (!isRewardedAdGateEnabled()) {
-      await beginGeneration();
-      return;
-    }
-
-    setAdMessage('');
-    setAdBusy(true);
-    const requestId = ++adRequestId.current;
-    try {
-      const result = await rewardedAdService.prepareRewardedAd();
-      if (requestId !== adRequestId.current) {
-        result.cancel?.();
-        return;
-      }
-      if (result.available) {
-        adSession.current = result;
-        setAdDialog('ready');
-      } else {
-        adSession.current = null;
-        setAdMessage(result.reason || 'A rewarded ad is not available right now.');
-        setAdDialog('unavailable');
-      }
-    } catch (adError) {
-      if (requestId !== adRequestId.current) return;
-      adSession.current = null;
-      setAdMessage(adError.message || 'The rewarded ad could not be prepared.');
-      setAdDialog('unavailable');
-    } finally {
-      if (requestId === adRequestId.current) setAdBusy(false);
-    }
-  }
-
-  async function watchRewardedAd() {
-    if (adBusy || adDialog !== 'ready') return;
-    if (!adSession.current) {
-      setAdMessage('The ad session expired. Try requesting another ad.');
-      setAdDialog('unavailable');
-      return;
-    }
-    setAdBusy(true);
-    setAdDialog('watching');
-    try {
-      const granted = await adSession.current.watch();
-      adSession.current = null;
-      if (granted) {
-        setAdDialog(null);
-        setAdMessage('');
-        await beginGeneration();
-        return;
-      }
-      setAdMessage('The ad reward was not completed. Watch another ad to generate this video.');
-      setAdDialog('unavailable');
-    } catch {
-      adSession.current = null;
-      setAdMessage('The ad could not be completed. Try requesting another one.');
-      setAdDialog('unavailable');
-    } finally {
-      setAdBusy(false);
-    }
-  }
-
-  function cancelRewardedAd() {
-    adRequestId.current += 1;
-    adSession.current?.cancel();
-    adSession.current = null;
-    setAdDialog(null);
-    setAdMessage('');
-    setAdBusy(false);
+    await beginGeneration();
   }
 
   function createAnother() {
@@ -604,6 +532,7 @@ function App() {
 
   return (
       <main className="app-shell">
+      <AdsterraOutOfPageScripts />
       <header className="topbar">
         <a className="brand" href="#top" aria-label="MATCH CUT home">
           <span className="brand-mark"><Icon name="mark" size={17} /></span>
@@ -742,8 +671,8 @@ function App() {
               </div>
             </details>
 
-            {!completed && <button className="generate-button" type="submit" disabled={busy || adBusy || isGenerating || !targetWord.trim()}>
-              <span>{isGenerating ? 'Generating...' : adBusy ? 'Checking ad availability…' : 'Generate Match Cut'}</span>
+            {!completed && <button className="generate-button" type="submit" disabled={busy || isGenerating || !targetWord.trim()}>
+              <span>{isGenerating ? 'Generating...' : 'Generate Match Cut'}</span>
               <span className={`button-icon${busy ? ' spinning' : ''}`}><Icon name={busy ? 'spinner' : 'arrow'} size={19} /></span>
             </button>}
             <p className="service-note">{serviceNote}</p>
@@ -818,38 +747,6 @@ function App() {
         <a href="#faq">FAQ</a>
       </nav>
 
-      {adDialog && (
-        <div className="modal-backdrop" onClick={adDialog === 'ready' || adDialog === 'unavailable' ? cancelRewardedAd : undefined}>
-          <div className="feedback-modal rewarded-modal" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="reward-modal-title">
-            <div className="feedback-modal-header">
-              <div>
-                <span className="feedback-kicker">REWARDED AD REQUIRED</span>
-                <h3 id="reward-modal-title">{adDialog === 'unavailable' ? 'Ad currently unavailable' : 'Watch an ad to generate your video'}</h3>
-              </div>
-            </div>
-            {adDialog === 'watching' ? (
-              <p className="rewarded-modal-copy">Finish the ad and close it when prompted. Your video starts after Google confirms the reward.</p>
-            ) : adDialog === 'unavailable' ? (
-              <>
-                <p className="rewarded-modal-copy">{adMessage || 'A completed rewarded ad is needed before generation can start.'} Try again when an ad is available.</p>
-                <div className="rewarded-modal-actions">
-                  <button type="button" className="submit-feedback-button" onClick={() => generate()} disabled={adBusy}>{adBusy ? 'Checking…' : 'Try Again'}</button>
-                  <button type="button" className="reward-cancel-button" onClick={cancelRewardedAd}>Cancel</button>
-                </div>
-              </>
-            ) : (
-              <>
-                <p className="rewarded-modal-copy">One completed rewarded ad is required for each video. Ad length varies; generation starts after Google confirms the reward.</p>
-                <div className="rewarded-modal-actions">
-                  <button type="button" className="submit-feedback-button" onClick={watchRewardedAd} disabled={adBusy}>{adBusy ? 'Opening ad…' : 'Watch Ad'}</button>
-                  <button type="button" className="reward-cancel-button" onClick={cancelRewardedAd}>Cancel</button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
       <section className="content-section examples-section" id="examples" aria-labelledby="examples-title">
         <div className="section-heading section-heading-wide">
           <div>
@@ -876,6 +773,8 @@ function App() {
           </article>
         </div>
       </section>
+
+      <AdsterraNativeBanner />
 
       <section className="content-section how-section" id="workflow" aria-labelledby="workflow-title">
         <div className="section-heading">
@@ -936,6 +835,8 @@ function App() {
         </div>
         <p className="comparison-note">This compares broad workflows, not prices or every tool’s capabilities.</p>
       </section>
+
+      <AdsterraLeaderboardBanner />
 
       <section className="content-section faq-section" id="faq" aria-labelledby="faq-title">
         <div className="section-heading section-heading-wide">
