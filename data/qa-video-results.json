@@ -1,0 +1,979 @@
+{
+  "Pakistan": {
+    "job_id": "8b2e623ef1464ae6b12b57aaf26ec809",
+    "status": "complete",
+    "video_url": "/media/output/8b2e623ef1464ae6b12b57aaf26ec809.mp4",
+    "metadata": {
+      "width": 1080,
+      "height": 1920,
+      "aspect_ratio": "9:16",
+      "fps": 30,
+      "duration": 3.0,
+      "requested_duration": 6.0,
+      "playback_speed": 2.0,
+      "frame_count": 90,
+      "article_count": 6,
+      "cut_frames": [
+        15,
+        30,
+        45,
+        60,
+        75
+      ],
+      "cut_times": [
+        0.5,
+        1.0,
+        1.5,
+        2.0,
+        2.5
+      ],
+      "audio_sample_rate": 48000,
+      "audio_cut_frames": [
+        15,
+        30,
+        45,
+        60,
+        75
+      ],
+      "codec": "H.264 / AAC",
+      "sound_style": "paper",
+      "sfx_id": "page_turn",
+      "sfx_asset": "page-turn.wav",
+      "background_enabled": false,
+      "background_volume": 32,
+      "sfx_volume": 72,
+      "highlight_mode": "default",
+      "highlight": "organic yellow pigment stroke shown at full strength for the default highlight",
+      "target_lock": "fixed centered phrase bounding box and scale across all source images",
+      "target_screen_bbox": [
+        300.24,
+        912.76,
+        479.52,
+        94.47
+      ],
+      "target_box_sequence": [
+        {
+          "x": 300.24,
+          "y": 912.76,
+          "width": 479.52,
+          "height": 94.47
+        },
+        {
+          "x": 300.24,
+          "y": 912.76,
+          "width": 479.52,
+          "height": 94.47
+        },
+        {
+          "x": 300.24,
+          "y": 912.76,
+          "width": 479.52,
+          "height": 94.47
+        },
+        {
+          "x": 300.24,
+          "y": 912.76,
+          "width": 479.52,
+          "height": 94.47
+        },
+        {
+          "x": 300.24,
+          "y": 912.76,
+          "width": 479.52,
+          "height": 94.47
+        },
+        {
+          "x": 300.24,
+          "y": 912.76,
+          "width": 479.52,
+          "height": 94.47
+        }
+      ],
+      "focus": "target and nearby lines remain sharp; outer article crop has a soft focus falloff",
+      "transition": "direct page cuts with each sound aligned to the first audio sample of its cut frame",
+      "camera": "fixed frame; no zoom, shake, or camera movement",
+      "font_styles": [
+        "Constantia",
+        "Arial",
+        "Courier New",
+        "Times New Roman",
+        "Georgia",
+        "Cambria"
+      ]
+    },
+    "error": null,
+    "progress": {
+      "job_id": "8b2e623ef1464ae6b12b57aaf26ec809",
+      "status": "complete",
+      "stage": "09 \u2014 Finalizing MP4",
+      "percent": 100,
+      "message": "MP4 is ready to preview and download",
+      "error": null,
+      "events": [
+        {
+          "stage": "01 \u2014 Searching Sources",
+          "percent": 1,
+          "message": "Starting automated public-source search",
+          "at": "2026-10-10T22:35:45.454646+00:00"
+        },
+        {
+          "stage": "01 \u2014 Searching Sources",
+          "percent": 4,
+          "message": "Searching public article indexes for \u201cPakistan\u201d",
+          "at": "2026-10-10T22:35:45.458692+00:00"
+        },
+        {
+          "stage": "02 \u2014 Downloading Sources",
+          "percent": 14,
+          "message": "Checking up to 0 public article pages",
+          "at": "2026-10-10T22:36:37.504219+00:00"
+        },
+        {
+          "stage": "03 \u2014 Running OCR",
+          "percent": 31,
+          "message": "Reading target-word positions on 0 retrieved article pages",
+          "at": "2026-10-10T22:36:37.504219+00:00"
+        },
+        {
+          "stage": "04 \u2014 Finding Target Word",
+          "percent": 43,
+          "message": "OCR confirmed 0 public article matches",
+          "at": "2026-10-10T22:36:37.508091+00:00"
+        },
+        {
+          "stage": "05 \u2014 Selecting Best Matches",
+          "percent": 48,
+          "message": "Searching more results and preparing 6 clearly fictional fallback pages",
+          "at": "2026-10-10T22:36:37.508091+00:00"
+        },
+        {
+          "stage": "06 \u2014 Building Match Cut Timeline",
+          "percent": 58,
+          "message": "Ordered 6 sources for stable word framing (0 public, 6 fictional)",
+          "at": "2026-10-10T22:36:41.020747+00:00"
+        },
+        {
+          "stage": "04 \u2014 Finding Target Word",
+          "percent": 58,
+          "message": "Target word found in 6 of 6 pages",
+          "at": "2026-10-10T22:36:41.034401+00:00"
+        },
+        {
+          "stage": "05 \u2014 Selecting Best Matches",
+          "percent": 58,
+          "message": "Ranking OCR clarity and target-word framing across 6 pages",
+          "at": "2026-10-10T22:36:41.036395+00:00"
+        },
+        {
+          "stage": "06 \u2014 Building Match Cut Timeline",
+          "percent": 60,
+          "message": "Locking the word to one shared screen position and scale",
+          "at": "2026-10-10T22:36:41.037410+00:00"
+        },
+        {
+          "stage": "07 \u2014 Designing Sound",
+          "percent": 67,
+          "message": "Preparing the page_turn sound effect and paper background",
+          "at": "2026-10-10T22:36:41.038392+00:00"
+        },
+        {
+          "stage": "08 \u2014 Rendering Video",
+          "percent": 73,
+          "message": "Encoding 1080 \u00d7 1920 H.264 frames",
+          "at": "2026-10-10T22:36:41.039928+00:00"
+        },
+        {
+          "stage": "07 \u2014 Designing Sound",
+          "percent": 73,
+          "message": "Building the frame-locked sound timeline",
+          "at": "2026-10-10T22:36:41.050767+00:00"
+        },
+        {
+          "stage": "08 \u2014 Rendering Video",
+          "percent": 73,
+          "message": "Preparing page 1 of 6",
+          "at": "2026-10-10T22:36:41.074481+00:00"
+        },
+        {
+          "stage": "08 \u2014 Rendering Video",
+          "percent": 77,
+          "message": "Preparing page 2 of 6",
+          "at": "2026-10-10T22:36:41.969045+00:00"
+        },
+        {
+          "stage": "08 \u2014 Rendering Video",
+          "percent": 81,
+          "message": "Preparing page 3 of 6",
+          "at": "2026-10-10T22:36:42.722792+00:00"
+        },
+        {
+          "stage": "08 \u2014 Rendering Video",
+          "percent": 85,
+          "message": "Preparing page 4 of 6",
+          "at": "2026-10-10T22:36:43.481559+00:00"
+        },
+        {
+          "stage": "08 \u2014 Rendering Video",
+          "percent": 88,
+          "message": "Preparing page 5 of 6",
+          "at": "2026-10-10T22:36:44.270437+00:00"
+        },
+        {
+          "stage": "08 \u2014 Rendering Video",
+          "percent": 89,
+          "message": "Rendered frame 61 of 90",
+          "at": "2026-10-10T22:36:44.713593+00:00"
+        },
+        {
+          "stage": "08 \u2014 Rendering Video",
+          "percent": 92,
+          "message": "Preparing page 6 of 6",
+          "at": "2026-10-10T22:36:45.000411+00:00"
+        },
+        {
+          "stage": "08 \u2014 Rendering Video",
+          "percent": 96,
+          "message": "Rendered frame 90 of 90",
+          "at": "2026-10-10T22:36:45.719885+00:00"
+        },
+        {
+          "stage": "09 \u2014 Finalizing MP4",
+          "percent": 100,
+          "message": "MP4 is ready to preview and download",
+          "at": "2026-10-10T22:36:45.775788+00:00"
+        }
+      ]
+    }
+  },
+  "Technology": {
+    "job_id": "7e37ede2b81049ffa32f07eb4224abc7",
+    "status": "complete",
+    "video_url": "/media/output/7e37ede2b81049ffa32f07eb4224abc7.mp4",
+    "metadata": {
+      "width": 1080,
+      "height": 1920,
+      "aspect_ratio": "9:16",
+      "fps": 30,
+      "duration": 3.0,
+      "requested_duration": 6.0,
+      "playback_speed": 2.0,
+      "frame_count": 90,
+      "article_count": 6,
+      "cut_frames": [
+        15,
+        30,
+        45,
+        60,
+        75
+      ],
+      "cut_times": [
+        0.5,
+        1.0,
+        1.5,
+        2.0,
+        2.5
+      ],
+      "audio_sample_rate": 48000,
+      "audio_cut_frames": [
+        15,
+        30,
+        45,
+        60,
+        75
+      ],
+      "codec": "H.264 / AAC",
+      "sound_style": "documentary",
+      "sfx_id": "editorial_tick",
+      "sfx_asset": "editorial-tick.wav",
+      "background_enabled": false,
+      "background_volume": 32,
+      "sfx_volume": 72,
+      "highlight_mode": "default",
+      "highlight": "organic yellow pigment stroke shown at full strength for the default highlight",
+      "target_lock": "fixed centered phrase bounding box and scale across all source images",
+      "target_screen_bbox": [
+        280.8,
+        911.2,
+        518.4,
+        97.59
+      ],
+      "target_box_sequence": [
+        {
+          "x": 280.8,
+          "y": 911.2,
+          "width": 518.4,
+          "height": 97.59
+        },
+        {
+          "x": 280.8,
+          "y": 911.2,
+          "width": 518.4,
+          "height": 97.59
+        },
+        {
+          "x": 280.8,
+          "y": 911.2,
+          "width": 518.4,
+          "height": 97.59
+        },
+        {
+          "x": 280.8,
+          "y": 911.2,
+          "width": 518.4,
+          "height": 97.59
+        },
+        {
+          "x": 280.8,
+          "y": 911.2,
+          "width": 518.4,
+          "height": 97.59
+        },
+        {
+          "x": 280.8,
+          "y": 911.2,
+          "width": 518.4,
+          "height": 97.59
+        }
+      ],
+      "focus": "target and nearby lines remain sharp; outer article crop has a soft focus falloff",
+      "transition": "direct page cuts with each sound aligned to the first audio sample of its cut frame",
+      "camera": "fixed frame; no zoom, shake, or camera movement",
+      "font_styles": [
+        "Arial",
+        "Constantia",
+        "Courier New",
+        "Times New Roman",
+        "Georgia",
+        "Cambria"
+      ]
+    },
+    "error": null,
+    "progress": {
+      "job_id": "7e37ede2b81049ffa32f07eb4224abc7",
+      "status": "complete",
+      "stage": "09 \u2014 Finalizing MP4",
+      "percent": 100,
+      "message": "MP4 is ready to preview and download",
+      "error": null,
+      "events": [
+        {
+          "stage": "01 \u2014 Searching Sources",
+          "percent": 1,
+          "message": "Starting automated public-source search",
+          "at": "2026-10-10T22:35:45.463277+00:00"
+        },
+        {
+          "stage": "01 \u2014 Searching Sources",
+          "percent": 4,
+          "message": "Searching public article indexes for \u201cTechnology\u201d",
+          "at": "2026-10-10T22:36:45.775788+00:00"
+        },
+        {
+          "stage": "02 \u2014 Downloading Sources",
+          "percent": 14,
+          "message": "Checking up to 0 public article pages",
+          "at": "2026-10-10T22:37:26.097777+00:00"
+        },
+        {
+          "stage": "03 \u2014 Running OCR",
+          "percent": 31,
+          "message": "Reading target-word positions on 0 retrieved article pages",
+          "at": "2026-10-10T22:37:26.102329+00:00"
+        },
+        {
+          "stage": "04 \u2014 Finding Target Word",
+          "percent": 43,
+          "message": "OCR confirmed 0 public article matches",
+          "at": "2026-10-10T22:37:26.105867+00:00"
+        },
+        {
+          "stage": "05 \u2014 Selecting Best Matches",
+          "percent": 48,
+          "message": "Searching more results and preparing 6 clearly fictional fallback pages",
+          "at": "2026-10-10T22:37:26.110754+00:00"
+        },
+        {
+          "stage": "06 \u2014 Building Match Cut Timeline",
+          "percent": 58,
+          "message": "Ordered 6 sources for stable word framing (0 public, 6 fictional)",
+          "at": "2026-10-10T22:37:29.539037+00:00"
+        },
+        {
+          "stage": "04 \u2014 Finding Target Word",
+          "percent": 58,
+          "message": "Target word found in 6 of 6 pages",
+          "at": "2026-10-10T22:37:29.543856+00:00"
+        },
+        {
+          "stage": "05 \u2014 Selecting Best Matches",
+          "percent": 58,
+          "message": "Ranking OCR clarity and target-word framing across 6 pages",
+          "at": "2026-10-10T22:37:29.543856+00:00"
+        },
+        {
+          "stage": "06 \u2014 Building Match Cut Timeline",
+          "percent": 60,
+          "message": "Locking the word to one shared screen position and scale",
+          "at": "2026-10-10T22:37:29.543856+00:00"
+        },
+        {
+          "stage": "07 \u2014 Designing Sound",
+          "percent": 67,
+          "message": "Preparing the editorial_tick sound effect and documentary background",
+          "at": "2026-10-10T22:37:29.549439+00:00"
+        },
+        {
+          "stage": "08 \u2014 Rendering Video",
+          "percent": 73,
+          "message": "Encoding 1080 \u00d7 1920 H.264 frames",
+          "at": "2026-10-10T22:37:29.549439+00:00"
+        },
+        {
+          "stage": "07 \u2014 Designing Sound",
+          "percent": 73,
+          "message": "Building the frame-locked sound timeline",
+          "at": "2026-10-10T22:37:29.549439+00:00"
+        },
+        {
+          "stage": "08 \u2014 Rendering Video",
+          "percent": 73,
+          "message": "Preparing page 1 of 6",
+          "at": "2026-10-10T22:37:29.571243+00:00"
+        },
+        {
+          "stage": "08 \u2014 Rendering Video",
+          "percent": 77,
+          "message": "Preparing page 2 of 6",
+          "at": "2026-10-10T22:37:30.311315+00:00"
+        },
+        {
+          "stage": "08 \u2014 Rendering Video",
+          "percent": 81,
+          "message": "Preparing page 3 of 6",
+          "at": "2026-10-10T22:37:31.037388+00:00"
+        },
+        {
+          "stage": "08 \u2014 Rendering Video",
+          "percent": 85,
+          "message": "Preparing page 4 of 6",
+          "at": "2026-10-10T22:37:31.759035+00:00"
+        },
+        {
+          "stage": "08 \u2014 Rendering Video",
+          "percent": 88,
+          "message": "Preparing page 5 of 6",
+          "at": "2026-10-10T22:37:32.475987+00:00"
+        },
+        {
+          "stage": "08 \u2014 Rendering Video",
+          "percent": 89,
+          "message": "Rendered frame 61 of 90",
+          "at": "2026-10-10T22:37:32.934629+00:00"
+        },
+        {
+          "stage": "08 \u2014 Rendering Video",
+          "percent": 92,
+          "message": "Preparing page 6 of 6",
+          "at": "2026-10-10T22:37:33.225031+00:00"
+        },
+        {
+          "stage": "08 \u2014 Rendering Video",
+          "percent": 96,
+          "message": "Rendered frame 90 of 90",
+          "at": "2026-10-10T22:37:33.902767+00:00"
+        },
+        {
+          "stage": "09 \u2014 Finalizing MP4",
+          "percent": 100,
+          "message": "MP4 is ready to preview and download",
+          "at": "2026-10-10T22:37:33.951248+00:00"
+        }
+      ]
+    }
+  },
+  "Economy": {
+    "job_id": "b303b3bf2dcd4946bad434d460dc40c6",
+    "status": "complete",
+    "video_url": "/media/output/b303b3bf2dcd4946bad434d460dc40c6.mp4",
+    "metadata": {
+      "width": 1080,
+      "height": 1920,
+      "aspect_ratio": "9:16",
+      "fps": 30,
+      "duration": 3.0,
+      "requested_duration": 6.0,
+      "playback_speed": 2.0,
+      "frame_count": 90,
+      "article_count": 6,
+      "cut_frames": [
+        15,
+        30,
+        45,
+        60,
+        75
+      ],
+      "cut_times": [
+        0.5,
+        1.0,
+        1.5,
+        2.0,
+        2.5
+      ],
+      "audio_sample_rate": 48000,
+      "audio_cut_frames": [
+        15,
+        30,
+        45,
+        60,
+        75
+      ],
+      "codec": "H.264 / AAC",
+      "sound_style": "cinematic",
+      "sfx_id": "film_projector",
+      "sfx_asset": "film-projector.wav",
+      "background_enabled": false,
+      "background_volume": 32,
+      "sfx_volume": 72,
+      "highlight_mode": "default",
+      "highlight": "organic yellow pigment stroke shown at full strength for the default highlight",
+      "target_lock": "fixed centered phrase bounding box and scale across all source images",
+      "target_screen_bbox": [
+        309.96,
+        909.06,
+        460.08,
+        101.88
+      ],
+      "target_box_sequence": [
+        {
+          "x": 309.96,
+          "y": 909.06,
+          "width": 460.08,
+          "height": 101.88
+        },
+        {
+          "x": 309.96,
+          "y": 909.06,
+          "width": 460.08,
+          "height": 101.88
+        },
+        {
+          "x": 309.96,
+          "y": 909.06,
+          "width": 460.08,
+          "height": 101.88
+        },
+        {
+          "x": 309.96,
+          "y": 909.06,
+          "width": 460.08,
+          "height": 101.88
+        },
+        {
+          "x": 309.96,
+          "y": 909.06,
+          "width": 460.08,
+          "height": 101.88
+        },
+        {
+          "x": 309.96,
+          "y": 909.06,
+          "width": 460.08,
+          "height": 101.88
+        }
+      ],
+      "focus": "target and nearby lines remain sharp; outer article crop has a soft focus falloff",
+      "transition": "direct page cuts with each sound aligned to the first audio sample of its cut frame",
+      "camera": "fixed frame; no zoom, shake, or camera movement",
+      "font_styles": [
+        "Arial",
+        "Times New Roman",
+        "Courier New",
+        "Georgia",
+        "Constantia",
+        "Cambria"
+      ]
+    },
+    "error": null,
+    "progress": {
+      "job_id": "b303b3bf2dcd4946bad434d460dc40c6",
+      "status": "complete",
+      "stage": "09 \u2014 Finalizing MP4",
+      "percent": 100,
+      "message": "MP4 is ready to preview and download",
+      "error": null,
+      "events": [
+        {
+          "stage": "01 \u2014 Searching Sources",
+          "percent": 1,
+          "message": "Starting automated public-source search",
+          "at": "2026-10-10T22:35:45.470066+00:00"
+        },
+        {
+          "stage": "01 \u2014 Searching Sources",
+          "percent": 4,
+          "message": "Searching public article indexes for \u201cEconomy\u201d",
+          "at": "2026-10-10T22:37:33.953452+00:00"
+        },
+        {
+          "stage": "02 \u2014 Downloading Sources",
+          "percent": 14,
+          "message": "Checking up to 0 public article pages",
+          "at": "2026-10-10T22:38:14.008506+00:00"
+        },
+        {
+          "stage": "03 \u2014 Running OCR",
+          "percent": 31,
+          "message": "Reading target-word positions on 0 retrieved article pages",
+          "at": "2026-10-10T22:38:14.017965+00:00"
+        },
+        {
+          "stage": "04 \u2014 Finding Target Word",
+          "percent": 43,
+          "message": "OCR confirmed 0 public article matches",
+          "at": "2026-10-10T22:38:14.022037+00:00"
+        },
+        {
+          "stage": "05 \u2014 Selecting Best Matches",
+          "percent": 48,
+          "message": "Searching more results and preparing 6 clearly fictional fallback pages",
+          "at": "2026-10-10T22:38:14.026402+00:00"
+        },
+        {
+          "stage": "06 \u2014 Building Match Cut Timeline",
+          "percent": 58,
+          "message": "Ordered 6 sources for stable word framing (0 public, 6 fictional)",
+          "at": "2026-10-10T22:38:17.621815+00:00"
+        },
+        {
+          "stage": "04 \u2014 Finding Target Word",
+          "percent": 58,
+          "message": "Target word found in 6 of 6 pages",
+          "at": "2026-10-10T22:38:17.628947+00:00"
+        },
+        {
+          "stage": "05 \u2014 Selecting Best Matches",
+          "percent": 58,
+          "message": "Ranking OCR clarity and target-word framing across 6 pages",
+          "at": "2026-10-10T22:38:17.628947+00:00"
+        },
+        {
+          "stage": "06 \u2014 Building Match Cut Timeline",
+          "percent": 60,
+          "message": "Locking the word to one shared screen position and scale",
+          "at": "2026-10-10T22:38:17.628947+00:00"
+        },
+        {
+          "stage": "07 \u2014 Designing Sound",
+          "percent": 67,
+          "message": "Preparing the film_projector sound effect and cinematic background",
+          "at": "2026-10-10T22:38:17.628947+00:00"
+        },
+        {
+          "stage": "08 \u2014 Rendering Video",
+          "percent": 73,
+          "message": "Encoding 1080 \u00d7 1920 H.264 frames",
+          "at": "2026-10-10T22:38:17.628947+00:00"
+        },
+        {
+          "stage": "07 \u2014 Designing Sound",
+          "percent": 73,
+          "message": "Building the frame-locked sound timeline",
+          "at": "2026-10-10T22:38:17.636589+00:00"
+        },
+        {
+          "stage": "08 \u2014 Rendering Video",
+          "percent": 73,
+          "message": "Preparing page 1 of 6",
+          "at": "2026-10-10T22:38:17.657060+00:00"
+        },
+        {
+          "stage": "08 \u2014 Rendering Video",
+          "percent": 77,
+          "message": "Preparing page 2 of 6",
+          "at": "2026-10-10T22:38:18.372637+00:00"
+        },
+        {
+          "stage": "08 \u2014 Rendering Video",
+          "percent": 81,
+          "message": "Preparing page 3 of 6",
+          "at": "2026-10-10T22:38:19.104625+00:00"
+        },
+        {
+          "stage": "08 \u2014 Rendering Video",
+          "percent": 85,
+          "message": "Preparing page 4 of 6",
+          "at": "2026-10-10T22:38:19.855019+00:00"
+        },
+        {
+          "stage": "08 \u2014 Rendering Video",
+          "percent": 88,
+          "message": "Preparing page 5 of 6",
+          "at": "2026-10-10T22:38:20.540438+00:00"
+        },
+        {
+          "stage": "08 \u2014 Rendering Video",
+          "percent": 89,
+          "message": "Rendered frame 61 of 90",
+          "at": "2026-10-10T22:38:20.997317+00:00"
+        },
+        {
+          "stage": "08 \u2014 Rendering Video",
+          "percent": 92,
+          "message": "Preparing page 6 of 6",
+          "at": "2026-10-10T22:38:21.270288+00:00"
+        },
+        {
+          "stage": "08 \u2014 Rendering Video",
+          "percent": 96,
+          "message": "Rendered frame 90 of 90",
+          "at": "2026-10-10T22:38:21.961210+00:00"
+        },
+        {
+          "stage": "09 \u2014 Finalizing MP4",
+          "percent": 100,
+          "message": "MP4 is ready to preview and download",
+          "at": "2026-10-10T22:38:22.008310+00:00"
+        }
+      ]
+    }
+  },
+  "Climate": {
+    "job_id": "93f5356c001948f6ba2497198dd61455",
+    "status": "complete",
+    "video_url": "/media/output/93f5356c001948f6ba2497198dd61455.mp4",
+    "metadata": {
+      "width": 1080,
+      "height": 1920,
+      "aspect_ratio": "9:16",
+      "fps": 30,
+      "duration": 3.0,
+      "requested_duration": 6.0,
+      "playback_speed": 2.0,
+      "frame_count": 90,
+      "article_count": 6,
+      "cut_frames": [
+        15,
+        30,
+        45,
+        60,
+        75
+      ],
+      "cut_times": [
+        0.5,
+        1.0,
+        1.5,
+        2.0,
+        2.5
+      ],
+      "audio_sample_rate": 48000,
+      "audio_cut_frames": [
+        15,
+        30,
+        45,
+        60,
+        75
+      ],
+      "codec": "H.264 / AAC",
+      "sound_style": "marker",
+      "sfx_id": "marker_write",
+      "sfx_asset": "marker-write.wav",
+      "background_enabled": false,
+      "background_volume": 32,
+      "sfx_volume": 72,
+      "highlight_mode": "default",
+      "highlight": "organic yellow pigment stroke shown at full strength for the default highlight",
+      "target_lock": "fixed centered phrase bounding box and scale across all source images",
+      "target_screen_bbox": [
+        309.96,
+        877.3,
+        460.08,
+        165.4
+      ],
+      "target_box_sequence": [
+        {
+          "x": 309.96,
+          "y": 877.3,
+          "width": 460.08,
+          "height": 165.4
+        },
+        {
+          "x": 309.96,
+          "y": 877.3,
+          "width": 460.08,
+          "height": 165.4
+        },
+        {
+          "x": 309.96,
+          "y": 877.3,
+          "width": 460.08,
+          "height": 165.4
+        },
+        {
+          "x": 309.96,
+          "y": 877.3,
+          "width": 460.08,
+          "height": 165.4
+        },
+        {
+          "x": 309.96,
+          "y": 877.3,
+          "width": 460.08,
+          "height": 165.4
+        },
+        {
+          "x": 309.96,
+          "y": 877.3,
+          "width": 460.08,
+          "height": 165.4
+        }
+      ],
+      "focus": "target and nearby lines remain sharp; outer article crop has a soft focus falloff",
+      "transition": "direct page cuts with each sound aligned to the first audio sample of its cut frame",
+      "camera": "fixed frame; no zoom, shake, or camera movement",
+      "font_styles": [
+        "Times New Roman",
+        "Georgia",
+        "Arial",
+        "Constantia",
+        "Courier New"
+      ]
+    },
+    "error": null,
+    "progress": {
+      "job_id": "93f5356c001948f6ba2497198dd61455",
+      "status": "complete",
+      "stage": "09 \u2014 Finalizing MP4",
+      "percent": 100,
+      "message": "MP4 is ready to preview and download",
+      "error": null,
+      "events": [
+        {
+          "stage": "01 \u2014 Searching Sources",
+          "percent": 1,
+          "message": "Starting automated public-source search",
+          "at": "2026-10-10T22:35:45.476773+00:00"
+        },
+        {
+          "stage": "01 \u2014 Searching Sources",
+          "percent": 4,
+          "message": "Searching public article indexes for \u201cClimate\u201d",
+          "at": "2026-10-10T22:38:22.012479+00:00"
+        },
+        {
+          "stage": "02 \u2014 Downloading Sources",
+          "percent": 14,
+          "message": "Checking up to 24 public article pages",
+          "at": "2026-10-10T22:39:18.114531+00:00"
+        },
+        {
+          "stage": "03 \u2014 Running OCR",
+          "percent": 31,
+          "message": "Reading target-word positions on 7 retrieved article pages",
+          "at": "2026-10-10T22:39:40.227321+00:00"
+        },
+        {
+          "stage": "04 \u2014 Finding Target Word",
+          "percent": 43,
+          "message": "OCR confirmed 6 public article matches",
+          "at": "2026-10-10T22:40:27.475345+00:00"
+        },
+        {
+          "stage": "06 \u2014 Building Match Cut Timeline",
+          "percent": 58,
+          "message": "Ordered 6 sources for stable word framing (6 public, 0 fictional)",
+          "at": "2026-10-10T22:40:27.478808+00:00"
+        },
+        {
+          "stage": "04 \u2014 Finding Target Word",
+          "percent": 58,
+          "message": "Target word found in 6 of 6 pages",
+          "at": "2026-10-10T22:40:27.489027+00:00"
+        },
+        {
+          "stage": "05 \u2014 Selecting Best Matches",
+          "percent": 58,
+          "message": "Ranking OCR clarity and target-word framing across 6 pages",
+          "at": "2026-10-10T22:40:27.495536+00:00"
+        },
+        {
+          "stage": "06 \u2014 Building Match Cut Timeline",
+          "percent": 60,
+          "message": "Locking the word to one shared screen position and scale",
+          "at": "2026-10-10T22:40:27.496280+00:00"
+        },
+        {
+          "stage": "07 \u2014 Designing Sound",
+          "percent": 67,
+          "message": "Preparing the marker_write sound effect and marker background",
+          "at": "2026-10-10T22:40:27.498380+00:00"
+        },
+        {
+          "stage": "08 \u2014 Rendering Video",
+          "percent": 73,
+          "message": "Encoding 1080 \u00d7 1920 H.264 frames",
+          "at": "2026-10-10T22:40:27.498380+00:00"
+        },
+        {
+          "stage": "07 \u2014 Designing Sound",
+          "percent": 73,
+          "message": "Building the frame-locked sound timeline",
+          "at": "2026-10-10T22:40:27.501900+00:00"
+        },
+        {
+          "stage": "08 \u2014 Rendering Video",
+          "percent": 73,
+          "message": "Preparing page 1 of 6",
+          "at": "2026-10-10T22:40:27.525152+00:00"
+        },
+        {
+          "stage": "08 \u2014 Rendering Video",
+          "percent": 77,
+          "message": "Preparing page 2 of 6",
+          "at": "2026-10-10T22:40:28.239327+00:00"
+        },
+        {
+          "stage": "08 \u2014 Rendering Video",
+          "percent": 81,
+          "message": "Preparing page 3 of 6",
+          "at": "2026-10-10T22:40:28.995763+00:00"
+        },
+        {
+          "stage": "08 \u2014 Rendering Video",
+          "percent": 85,
+          "message": "Preparing page 4 of 6",
+          "at": "2026-10-10T22:40:29.723079+00:00"
+        },
+        {
+          "stage": "08 \u2014 Rendering Video",
+          "percent": 88,
+          "message": "Preparing page 5 of 6",
+          "at": "2026-10-10T22:40:30.472114+00:00"
+        },
+        {
+          "stage": "08 \u2014 Rendering Video",
+          "percent": 89,
+          "message": "Rendered frame 61 of 90",
+          "at": "2026-10-10T22:40:30.957134+00:00"
+        },
+        {
+          "stage": "08 \u2014 Rendering Video",
+          "percent": 92,
+          "message": "Preparing page 6 of 6",
+          "at": "2026-10-10T22:40:31.212123+00:00"
+        },
+        {
+          "stage": "08 \u2014 Rendering Video",
+          "percent": 96,
+          "message": "Rendered frame 90 of 90",
+          "at": "2026-10-10T22:40:31.862963+00:00"
+        },
+        {
+          "stage": "09 \u2014 Finalizing MP4",
+          "percent": 100,
+          "message": "MP4 is ready to preview and download",
+          "at": "2026-10-10T22:40:31.910578+00:00"
+        }
+      ]
+    }
+  }
+}
