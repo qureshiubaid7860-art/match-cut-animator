@@ -108,15 +108,15 @@ class HighlightModeTests(unittest.TestCase):
 
 
 class PageSelectionTests(unittest.TestCase):
-    def test_generation_and_search_accept_12_24_and_36_pages(self):
-        for count in (12, 24, 36):
+    def test_generation_and_search_accept_page_counts_through_72(self):
+        for count in (12, 24, 36, 48, 60, 72):
             with self.subTest(count=count):
                 self.assertEqual(GenerateRequest(target_word="NASA", number_of_articles=count).number_of_articles, count)
                 self.assertEqual(SearchRequest(target_word="NASA", number_of_articles=count).number_of_articles, count)
         with self.assertRaises(ValueError):
-            GenerateRequest(target_word="NASA", number_of_articles=37)
+            GenerateRequest(target_word="NASA", number_of_articles=73)
         with self.assertRaises(ValueError):
-            SearchRequest(target_word="NASA", number_of_articles=37)
+            SearchRequest(target_word="NASA", number_of_articles=73)
 
     def test_repeated_article_ids_sources_and_page_files_are_removed(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -145,10 +145,10 @@ class PageSelectionTests(unittest.TestCase):
             unique = order_for_match_cuts([original, duplicate_id, duplicate_source, duplicate_page])
         self.assertEqual([article.id for article in unique], ["first"])
 
-    def test_fictional_fallback_editions_remain_distinct_after_36_pages(self):
-        pages = [_fictional_page("TACO again", index) for index in (0, 8, 24, 35)]
+    def test_fictional_fallback_editions_remain_distinct_after_72_pages(self):
+        pages = [_fictional_page("TACO again", index) for index in (0, 8, 24, 35, 71)]
         self.assertEqual(len({hashlib.sha256(page).digest() for _, page, _ in pages}), len(pages))
-        self.assertEqual([source["edition"] for _, _, source in pages], [1, 9, 25, 36])
+        self.assertEqual([source["edition"] for _, _, source in pages], [1, 9, 25, 36, 72])
 
     def test_successive_newspaper_pages_change_font_family(self):
         pages = [_fictional_page("TACO again", index) for index in range(len(_PAGE_FONT_FAMILIES))]

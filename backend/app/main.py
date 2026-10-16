@@ -82,13 +82,15 @@ SEO_PAGES = (
 def _with_runtime_seo(document: str, request: Request, path: str) -> str:
     import html
 
-    canonical = html.escape(str(request.base_url).rstrip("/") + path, quote=True)
+    canonical = html.escape(_public_base_url(request) + path, quote=True)
     tags = f'<link rel="canonical" href="{canonical}" /><meta property="og:url" content="{canonical}" />'
     return document.replace("<!-- MATCH_CUT_RUNTIME_SEO -->", tags, 1)
 
 
-@app.get("/{slug}/", include_in_schema=False)
-@app.get("/{slug}", include_in_schema=False)
+def _public_base_url(request: Request) -> str:
+    return config.FRONTEND_URL or str(request.base_url).rstrip("/")
+
+
 def editorial_page(slug: str, request: Request):
     if slug not in SEO_PAGES:
         return JSONResponse(status_code=404, content={"detail": "Page not found"})
@@ -102,18 +104,32 @@ def editorial_page(slug: str, request: Request):
 
 @app.get("/robots.txt", include_in_schema=False)
 def robots(request: Request):
-    base_url = str(request.base_url).rstrip("/")
+    base_url = _public_base_url(request)
     body = "User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /media/\nSitemap: " + base_url + "/sitemap.xml\n"
     return PlainTextResponse(body)
 
 
 @app.get("/sitemap.xml", include_in_schema=False)
 def sitemap(request: Request):
-    base_url = str(request.base_url).rstrip("/")
+    import html
+
     paths = ("", *(f"{slug}/" for slug in SEO_PAGES))
-    entries = "".join(f"<url><loc>{base_url}/{path}</loc></url>" for path in paths)
+    base_url = _public_base_url(request)
+    entries = "".join(f"<url><loc>{html.escape(base_url + '/' + path)}</loc></url>" for path in paths)
     xml = '<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + entries + "</urlset>"
     return Response(xml, media_type="application/xml")
+
+
+def _editorial_endpoint(slug: str):
+    def endpoint(request: Request):
+        return editorial_page(slug, request)
+
+    return endpoint
+
+
+for _slug in SEO_PAGES:
+    app.add_api_route(f"/{_slug}", _editorial_endpoint(_slug), methods=["GET"], include_in_schema=False)
+    app.add_api_route(f"/{_slug}/", _editorial_endpoint(_slug), methods=["GET"], include_in_schema=False)
 
 
 if FRONTEND_DIST.is_dir():

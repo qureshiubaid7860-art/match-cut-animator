@@ -9,7 +9,7 @@ function isLocalDevelopment() {
 }
 
 export function isRewardedAdGateEnabled() {
-  return ADS_ENABLED && Boolean(AD_UNIT_PATH) && !isLocalDevelopment();
+  return ADS_ENABLED && !isLocalDevelopment();
 }
 
 function loadGoogleTag() {
@@ -37,6 +37,9 @@ function loadGoogleTag() {
 export async function prepareRewardedAd() {
   if (!isRewardedAdGateEnabled()) {
     return { available: false, reason: 'Rewarded ads are disabled or not configured.' };
+  }
+  if (!AD_UNIT_PATH) {
+    return { available: false, reason: 'The Google rewarded ad unit path is not configured.' };
   }
 
   if (!await loadGoogleTag()) {

@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 import threading
 import time
-from math import gcd
+from math import gcd, pi, sin
 from pathlib import Path
 from typing import Callable
 
@@ -60,9 +60,9 @@ def ffmpeg_path() -> str:
 
 
 def validate_articles(articles: list[Article]) -> None:
-    if len(articles) < 3:
+    if len(articles) < 2:
         raise ValueError(
-            "At least 3 OCR-confirmed article pages are required to render a match cut."
+            "At least 2 OCR-confirmed article pages are required to render a match cut."
         )
 
     for article in articles:
@@ -222,7 +222,7 @@ def _draw_marker(
     box: tuple[float, float, float, float],
     reveal_fraction: float = 1.0,
 ) -> Image.Image:
-    """Lay a clean, authentic vibrant yellow highlighter stroke across the target word."""
+    """Draw a lightly textured hand-marked stroke while keeping printed ink readable."""
     reveal_fraction = max(0.0, min(1.0, reveal_fraction))
     if reveal_fraction <= 0.0:
         return frame
@@ -231,13 +231,12 @@ def _draw_marker(
     word_width = max(2.0, x2 - x1)
     word_height = max(2.0, y2 - y1)
 
-    pad_x = max(6, round(word_height * 0.14))
-    pad_y = max(3, round(word_height * 0.08))
-
+    pad_x = max(10, round(word_width * 0.055))
+    stroke_height = max(10, round(word_height * 0.82))
     left = max(0, round(x1 - pad_x))
-    top = max(0, round(y1 - pad_y))
-    right = min(frame.width, round(x2 + pad_x))
-    bottom = min(frame.height, round(y2 + pad_y))
+    top = max(0, round(y1 + word_height * 0.09))
+    right = min(frame.width, round(x1 - pad_x + (word_width + 2 * pad_x) * reveal_fraction))
+    bottom = min(frame.height, top + stroke_height)
 
     patch_width = right - left
     patch_height = bottom - top
@@ -245,26 +244,33 @@ def _draw_marker(
     if patch_width < 2 or patch_height < 2:
         return frame
 
-    reveal_width = max(1, min(patch_width, round(patch_width * reveal_fraction)))
-
     mask = Image.new("L", (patch_width, patch_height), 0)
-    radius = max(3, min(12, round(patch_height * 0.16)))
-    ImageDraw.Draw(mask).rounded_rectangle((0, 0, reveal_width, patch_height), radius=radius, fill=255)
-    mask = mask.filter(ImageFilter.GaussianBlur(radius=0.75))
+    rng = np.random.default_rng(8197)
+    brush = ImageDraw.Draw(mask)
+    knots = max(8, min(22, round(patch_width / 28)))
+    upper = []
+    lower = []
+    for index in range(knots + 1):
+        x = index * max(0, patch_width - 1) / knots
+        tilt = (index / knots - 0.5) * patch_height * 0.05
+        top_edge = patch_height * (0.16 + rng.uniform(-0.055, 0.055)) + tilt
+        bottom_edge = patch_height * (0.83 + rng.uniform(-0.06, 0.06)) + tilt
+        upper.append((x, max(0, min(patch_height - 1, top_edge))))
+        lower.append((x, max(0, min(patch_height - 1, bottom_edge))))
+    brush.polygon(upper + list(reversed(lower)), fill=255)
+    mask = mask.filter(ImageFilter.GaussianBlur(radius=1.0))
 
-    mask_values = np.asarray(mask, dtype=np.float32) / 255.0
-
+    mask_values = np.asarray(mask, dtype=np.float32)
+    row_texture = rng.uniform(0.88, 1.04, size=(patch_height, 1)).astype(np.float32)
+    texture = rng.uniform(0.82, 1.0, size=mask_values.shape).astype(np.float32) * row_texture
     original = frame.crop((left, top, right, bottom))
     pixels = np.asarray(original, dtype=np.float32)
-
-    # Authentic documentary highlighter: vibrant translucent yellow multiply blend
-    yellow_tint = np.array([255.0, 226.0, 38.0], dtype=np.float32) / 255.0
-    highlighted = np.clip(pixels * yellow_tint * 0.90 + pixels * 0.10 * yellow_tint, 0.0, 255.0)
-
-    blended = pixels * (1.0 - mask_values[:, :, None]) + highlighted * mask_values[:, :, None]
-    result = Image.fromarray(np.clip(blended, 0.0, 255.0).astype(np.uint8))
-
-    frame.paste(result, (left, top))
+    luminance = pixels[..., 0] * 0.2126 + pixels[..., 1] * 0.7152 + pixels[..., 2] * 0.0722
+    ink_visibility = 0.42 + 0.58 * np.clip(luminance / 220.0, 0.0, 1.0)
+    alpha = np.clip(mask_values * texture * 0.88 * ink_visibility, 0, 255).astype(np.uint8)
+    color = Image.new("RGB", (patch_width, patch_height), (255, 226, 24))
+    marker = Image.composite(color, original, Image.fromarray(alpha, mode="L"))
+    frame.paste(marker, (left, top))
     return frame
 
 
@@ -322,6 +328,7 @@ def _draw_underline(
 def _focus_falloff(
     frame: Image.Image,
     box: tuple[float, float, float, float],
+    blur_intensity: float = 1.0,
 ) -> Image.Image:
     """Keep the phrase and nearby article lines sharp; soften the outer crop."""
     x1, y1, x2, y2 = box
@@ -359,10 +366,7 @@ def _focus_falloff(
         max(48, round(frame.height * 0.045)),
     )
 
-    softened = _cheap_blur(
-        frame,
-        3.5,
-    )
+    softened = _cheap_blur(frame, 4.6 * max(0.0, blur_intensity))
 
     return Image.composite(
         frame,
@@ -378,6 +382,7 @@ def _compose_page_frame(
     target_box: tuple[float, float],
     highlight_mode: str,
     caption: str,
+    blur_intensity: float = 1.0,
 ) -> Image.Image:
     source, bbox, background = _prepare_source(
         article,
@@ -401,6 +406,7 @@ def _compose_page_frame(
             target_box,
             highlight_mode,
             reveal,
+            blur_intensity=blur_intensity,
         )
 
         return _draw_caption(
@@ -422,6 +428,7 @@ def _make_frame(
     target_box: tuple[float, float],
     highlight_mode: str = "highlight",
     reveal_fraction: float = 1.0,
+    blur_intensity: float = 1.0,
 ) -> Image.Image:
     word_cx = bbox[0] + bbox[2] / 2
     word_cy = bbox[1] + bbox[3] / 2
@@ -506,6 +513,7 @@ def _make_frame(
     frame = _focus_falloff(
         frame,
         screen_box,
+        blur_intensity,
     )
 
     if highlight_mode in {"default", "highlight"}:
@@ -532,6 +540,8 @@ def _make_frame(
 def _zoom_frame(
     frame: Image.Image,
     scale: float,
+    shake_x: float = 0.0,
+    shake_y: float = 0.0,
 ) -> Image.Image:
     if scale <= 1.0:
         return frame
@@ -543,12 +553,12 @@ def _zoom_frame(
     offset_x = (
         width
         - width * inverse_scale
-    ) / 2
+    ) / 2 - shake_x * inverse_scale
 
     offset_y = (
         height
         - height * inverse_scale
-    ) / 2
+    ) / 2 - shake_y * inverse_scale
 
     return frame.transform(
         frame.size,
@@ -581,6 +591,7 @@ def _target_box_for_page(
     width: int,
     height: int,
     page_index: int,
+    zoom_level: float = 1.0,
 ) -> tuple[float, float]:
     scale_beats = (
         0.92,
@@ -592,21 +603,22 @@ def _target_box_for_page(
     )
 
     base_width = width * min(
-        0.58,
+        0.50,
         max(
-            0.34,
-            0.30 + len(target_word.strip()) * 0.018,
+            0.25,
+            0.25 + len(target_word.strip()) * 0.012,
         ),
     )
 
     target_width = min(
-        width * 0.67,
+        width * 0.84,
         max(
-            width * 0.28,
+            width * 0.24,
             base_width
             * scale_beats[
                 page_index % len(scale_beats)
-            ],
+            ]
+            * zoom_level,
         ),
     )
 
@@ -831,6 +843,8 @@ def render_video(
     sfx_id: str = "click",
     aspect_ratio: str | None = None,
     highlight_mode: str = "highlight",
+    zoom_level: float = 1.5,
+    blur_intensity: float = 1.0,
 ) -> dict:
 
     validate_articles(articles)
@@ -876,6 +890,12 @@ def render_video(
         raise ValueError(
             f"Unsupported highlight mode: {highlight_mode}"
         )
+
+    if not 1.0 <= zoom_level <= 2.0:
+        raise ValueError("Zoom level must be between 1.0× and 2.0×.")
+
+    if not 0.0 <= blur_intensity <= 2.5:
+        raise ValueError("Blur intensity must be between 0× and 2.5×.")
 
     fps = max(
         24,
@@ -925,6 +945,7 @@ def render_video(
             width,
             height,
             index,
+            zoom_level,
         )
         for index, article in enumerate(articles)
     ]
@@ -1168,6 +1189,7 @@ def render_video(
                         ],
                         highlight_mode,
                         caption,
+                        blur_intensity=blur_intensity,
                     )
 
                     loaded_index = article_index
@@ -1225,9 +1247,28 @@ def render_video(
                         timeline_progress,
                     )
 
+                if highlight_mode == "default":
+                    page_t = max(0.0, min(1.0, page_progress))
+                    eased_progress = page_t * page_t * (3.0 - 2.0 * page_t)
+                    camera_scale = 1.025 + 0.105 * eased_progress + 0.012 * sin(pi * page_t)
+                    shake_x = width * (
+                        0.0028 * sin(frame_index * 0.91)
+                        + 0.0012 * sin(frame_index * 1.87)
+                    )
+                    shake_y = height * (
+                        0.0022 * sin(frame_index * 0.77 + 0.6)
+                        + 0.0010 * sin(frame_index * 1.63)
+                    )
+                else:
+                    camera_scale = 1.0 + 0.045 * page_progress
+                    shake_x = 0.0
+                    shake_y = 0.0
+
                 frame = _zoom_frame(
                     frame,
-                    1.0 + 0.045 * page_progress,
+                    camera_scale,
+                    shake_x,
+                    shake_y,
                 )
 
                 # ---------------------------------------------------------
@@ -1404,6 +1445,8 @@ def render_video(
         "background_volume": background_volume,
         "sfx_volume": sfx_volume,
         "highlight_mode": highlight_mode,
+        "zoom_level": round(zoom_level, 2),
+        "blur_intensity": round(blur_intensity, 2),
         "highlight": (
             "organic yellow pigment stroke shown at full strength for the default highlight"
             if highlight_mode == "default"
@@ -1464,8 +1507,8 @@ def render_video(
             "to the first audio sample of its cut frame"
         ),
         "camera": (
-            "centered documentary push-in of up to 4.5% "
-            "on each page; highlighted phrase stays centered"
+            "centered documentary push-in of up to 13% with "
+            "subtle handheld shake; highlighted phrase stays centered"
         ),
         "font_styles": list(
             dict.fromkeys(

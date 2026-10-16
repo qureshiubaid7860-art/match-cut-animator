@@ -38,8 +38,10 @@ class GenerateRequest(BaseModel):
     upload_id: str | None = None
     target_word: str
     article_ids: list[str] | None = None
-    number_of_articles: int = Field(default=6, ge=3, le=36)
+    number_of_articles: int = Field(default=6, ge=3, le=72)
     duration: float = Field(default_factory=lambda: config.DEFAULT_DURATION, ge=3.0, le=30.0)
+    zoom_level: float = Field(default=1.5, ge=1.0, le=2.0)
+    blur_intensity: float = Field(default=1.0, ge=0.0, le=2.5)
     fps: int = Field(default_factory=lambda: config.DEFAULT_FPS, ge=24, le=60)
     width: int = Field(default_factory=lambda: config.OUTPUT_WIDTH, ge=540, le=2160)
     height: int = Field(default_factory=lambda: config.OUTPUT_HEIGHT, ge=960, le=3840)
@@ -56,7 +58,7 @@ class GenerateRequest(BaseModel):
 
 class SearchRequest(BaseModel):
     target_word: str
-    number_of_articles: int = Field(default=6, ge=3, le=36)
+    number_of_articles: int = Field(default=6, ge=3, le=72)
 
 
 class FeedbackRequest(BaseModel):
@@ -95,9 +97,9 @@ def _analysis_payload(upload_id: str, target_word: str, articles):
     if articles and len(errors) == len(articles):
         state = "ocr_failed"
         message = errors[0].ocr_error or "OCR could not read the images."
-    elif found < 3:
+    elif found < 2:
         state = "insufficient"
-        message = f"Found “{target_word}” in {found} of {len(articles)} images. At least 3 readable matches are needed to make a video."
+        message = f"Found “{target_word}” in {found} of {len(articles)} images. At least 2 readable matches are needed to make a video."
     else:
         state = "ready"
         message = f"Found “{target_word}” in {found} images. Review the focus frames, then generate."
@@ -147,7 +149,7 @@ def health():
         "ffmpeg": ffmpeg,
         "ffmpeg_ready": ffmpeg_ready,
         "auto_search_configured": True,
-        "auto_search_provider": "GDELT DOC",
+        "auto_search_provider": "GDELT DOC + Bing News RSS",
         "supported_formats": ["jpg", "jpeg", "png", "webp", "pdf"],
         "output": {"width": config.OUTPUT_WIDTH, "height": config.OUTPUT_HEIGHT, "fps": config.DEFAULT_FPS, "duration": config.DEFAULT_DURATION},
         "render_timeout": config.RENDER_TIMEOUT,
@@ -286,8 +288,8 @@ def _generation_worker(job: Job, request: GenerateRequest) -> None:
             [article for article in articles if article.found and article.bbox]
         )
         set_progress(job, "04 — Finding Target Word", 44, f"Target word found in {len(matches)} of {len(articles)} pages")
-        if len(matches) < 3:
-            raise ValueError(f"Found “{word}” in {len(matches)} images. At least 3 readable matches are needed to render a video.")
+        if len(matches) < 2:
+            raise ValueError(f"Found “{word}” in {len(matches)} images. At least 2 readable matches are needed to render a video.")
         matches = matches[:request.number_of_articles]
         validate_articles(matches)
         logger.info(
@@ -321,6 +323,8 @@ def _generation_worker(job: Job, request: GenerateRequest) -> None:
             aspect_ratio=request.aspect_ratio,
             target_word=word,
             highlight_mode=request.highlight_mode,
+            zoom_level=request.zoom_level,
+            blur_intensity=request.blur_intensity,
             progress=render_progress,
         )
         if request.caption.strip():
@@ -446,8 +450,8 @@ def sources(job_id: str):
 def capabilities():
     return {
         "auto_search_configured": True,
-        "auto_search_provider": "GDELT DOC" + (" + NewsAPI" if config.NEWSAPI_KEY else ""),
-        "provider_message": "Public article search is ready. Clearly labeled fictional editorials fill any remaining slots automatically.",
+        "auto_search_provider": "GDELT DOC + Bing News RSS" + (" + NewsAPI" if config.NEWSAPI_KEY else ""),
+        "provider_message": "Public article pages are used when available; clearly labeled generated pages fill any remaining selected slots.",
         "generated_fallback": True,
     }
 
@@ -478,5 +482,8 @@ def search(request: SearchRequest):
     except (RuntimeError, httpx.HTTPError, ValueError) as exc:
         raise HTTPException(status_code=502, detail=f"Automatic source acquisition failed: {str(exc)[:220]}") from exc
     payload = _analysis_payload(session.id, word, added)
-    return {**payload, "provider": "GDELT DOC with fictional-page fallback", "source_count": len(added)}
+    providers = "GDELT DOC and Bing News RSS"
+    if config.NEWSAPI_KEY:
+        providers += " with NewsAPI"
+    return {**payload, "provider": providers, "source_count": len(added)}
 from fastapi.responses import FileResponse
