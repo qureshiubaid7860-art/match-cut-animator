@@ -81,7 +81,10 @@ def _generate_page(index: int, path: Path) -> None:
             draw.line((x, rule_y, x + rng.randint(400, 470), rule_y), fill="#b9b4a8", width=1)
     draw.line((84, 1572, 1116, 1572), fill=ink, width=2)
     draw.text((88, 1588), f"LOCAL SAMPLE LAYOUT     •     PAGE {index + 1}", font=_font(17, family_index=family_index), fill="#777267")
-    image.save(path, "JPEG", quality=94)
+    try:
+        image.save(path, "JPEG", quality=94)
+    finally:
+        image.close()
 
 
 def create_demo() -> tuple[str, list[Article]]:
@@ -92,22 +95,24 @@ def create_demo() -> tuple[str, list[Article]]:
         path = Path(session.id + "-demo.jpg")
         from ..config import WORK_DIR
         path = WORK_DIR / path
-        _generate_page(index, path)
-        article = _new_article(
-            session.id,
-            f"Sample layout {index + 1:02d}.jpg",
-            path.read_bytes(),
-            1,
-            {
-                "publication": "LOCAL DEMO LAYOUT",
-                "headline": _HEADLINES[index],
-                "date": "2026-10",
-                "source_url": "",
-                "generated": True,
-                "font_style": _page_font_style(index)[1],
-            },
-        )
+        try:
+            _generate_page(index, path)
+            article = _new_article(
+                session.id,
+                f"Sample layout {index + 1:02d}.jpg",
+                path,
+                1,
+                {
+                    "publication": "LOCAL DEMO LAYOUT",
+                    "headline": _HEADLINES[index],
+                    "date": "2026-10",
+                    "source_url": "",
+                    "generated": True,
+                    "font_style": _page_font_style(index)[1],
+                },
+            )
+        finally:
+            path.unlink(missing_ok=True)
         session.article_ids.append(article.id)
         articles.append(article)
-        path.unlink(missing_ok=True)
     return session.id, articles

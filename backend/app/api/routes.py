@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import tempfile
 import time
 import uuid
 from datetime import datetime, timezone
@@ -12,10 +13,23 @@ import httpx
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
 from .. import config
-from ..jobs import enqueue_generation, job_from_payload, job_path, make_job, register_generation_handler, set_progress
-from ..models import ARTICLES, JOBS, SESSIONS, Job
+from ..jobs import (
+    cache_job,
+    cached_job,
+    enqueue_generation,
+    forget_job,
+    job_from_payload,
+    job_path,
+    make_job,
+    register_generation_handler,
+    release_media_slot,
+    set_progress,
+    try_acquire_media_slot,
+)
+from ..models import ARTICLES, SESSIONS, Job
 from ..ocr.engine import normalized_terms
 from ..services.analysis import analyze_articles
 from ..services.acquisition import acquire_sources, order_for_match_cuts
@@ -179,23 +193,46 @@ async def upload_articles(
     session = SESSIONS.get(upload_id) if upload_id else None
     if upload_id and not session:
         raise HTTPException(status_code=404, detail="Upload session not found. Start a new upload.")
+    if not try_acquire_media_slot():
+        raise HTTPException(status_code=429, detail="Another upload, OCR task, or render is using the media worker. Try again when it finishes.")
     session = session or create_session()
     added = []
     total_bytes = 0
     errors = []
+    temp_path = None
     try:
         for uploaded_file in files:
             filename = Path(uploaded_file.filename or "article").name
-            payload = await uploaded_file.read(config.MAX_UPLOAD_BYTES + 1)
-            total_bytes += len(payload)
-            if len(payload) > config.MAX_UPLOAD_BYTES:
-                errors.append(f"{filename}: file exceeds {config.MAX_UPLOAD_BYTES // (1024 * 1024)} MB.")
+            file_size = 0
+            too_large = False
+            too_large_total = False
+            suffix = Path(filename).suffix[:12]
+            with tempfile.NamedTemporaryFile(prefix="matchcut-upload-", suffix=suffix, dir=config.WORK_DIR, delete=False) as temp_file:
+                temp_path = Path(temp_file.name)
+                while True:
+                    chunk = await uploaded_file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    file_size += len(chunk)
+                    total_bytes += len(chunk)
+                    if file_size > config.MAX_UPLOAD_BYTES:
+                        too_large = True
+                        break
+                    if total_bytes > config.MAX_UPLOAD_BYTES * min(len(files), 5):
+                        too_large_total = True
+                        break
+                    temp_file.write(chunk)
+            if too_large or too_large_total:
+                temp_path.unlink(missing_ok=True)
+                temp_path = None
+                if too_large:
+                    errors.append(f"{filename}: file exceeds {config.MAX_UPLOAD_BYTES // (1024 * 1024)} MB.")
+                if too_large_total:
+                    errors.append("The total upload is too large. Try fewer or smaller files.")
+                    break
                 continue
-            if total_bytes > config.MAX_UPLOAD_BYTES * min(len(files), 5):
-                errors.append("The total upload is too large. Try fewer or smaller files.")
-                break
             try:
-                batch = add_upload(session.id, filename, payload)
+                batch = await run_in_threadpool(add_upload, session.id, filename, temp_path)
                 if len(session.article_ids) + len(batch) > config.MAX_ARTICLES:
                     for article in batch:
                         Path(article.path).unlink(missing_ok=True)
@@ -208,9 +245,18 @@ async def upload_articles(
                 added.extend(batch)
             except ValueError as exc:
                 errors.append(str(exc))
+            finally:
+                if temp_path is not None:
+                    temp_path.unlink(missing_ok=True)
+                    temp_path = None
     finally:
-        for uploaded_file in files:
-            await uploaded_file.close()
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
+        try:
+            for uploaded_file in files:
+                await uploaded_file.close()
+        finally:
+            release_media_slot()
     if target_word:
         session.target_word = _target(target_word)
     if not added:
@@ -232,7 +278,12 @@ def analyze(request: AnalyzeRequest):
     if not articles:
         raise HTTPException(status_code=422, detail="This upload does not contain any article images to analyze.")
     session.target_word = target_word
-    analyze_articles(articles, target_word)
+    if not try_acquire_media_slot():
+        raise HTTPException(status_code=429, detail="Another upload, OCR task, or render is using the media worker. Try again when it finishes.")
+    try:
+        analyze_articles(articles, target_word)
+    finally:
+        release_media_slot()
     session.analysis_target = target_word
     return _analysis_payload(request.upload_id, target_word, articles)
 
@@ -366,34 +417,50 @@ def _generation_worker(job: Job, request: GenerateRequest) -> None:
 register_generation_handler(_generation_worker)
 
 
-@router.post("/generate")
+@router.post("/generate", status_code=202)
 def generate(request: GenerateRequest):
     if request.upload_id:
         _valid_session(request.upload_id)
     _target(request.target_word)
     job_id = uuid.uuid4().hex
     job = make_job(job_id, request.upload_id or "", request.target_word.strip())
-    JOBS[job_id] = job
+    cache_job(job)
     try:
         enqueue_generation(job, request)
     except RuntimeError as exc:
-        JOBS.pop(job_id, None)
+        forget_job(job_id)
+        job_path(job_id).unlink(missing_ok=True)
         raise HTTPException(status_code=429, detail=str(exc)) from exc
     return {"job_id": job.id, "status": job.status, "message": "Automatic source search and video generation have started."}
 
 
-@router.post("/demo")
+@router.post("/demo", status_code=202)
 def demo(duration: float = 10.0):
-    upload_id, articles = create_demo()
-    job_id = uuid.uuid4().hex
-    request = GenerateRequest(upload_id=upload_id, target_word="NASA", duration=duration)
-    job = make_job(job_id, upload_id, "NASA")
-    JOBS[job_id] = job
+    if not try_acquire_media_slot():
+        raise HTTPException(status_code=429, detail="Another upload, OCR task, or render is using the media worker. Try again when it finishes.")
     try:
-        enqueue_generation(job, request)
-    except RuntimeError as exc:
-        JOBS.pop(job_id, None)
-        raise HTTPException(status_code=429, detail=str(exc)) from exc
+        upload_id, articles = create_demo()
+        job_id = uuid.uuid4().hex
+        request = GenerateRequest(upload_id=upload_id, target_word="NASA", duration=duration)
+        job = make_job(job_id, upload_id, "NASA")
+        cache_job(job)
+        try:
+            enqueue_generation(job, request)
+        except RuntimeError as exc:
+            forget_job(job_id)
+            job_path(job_id).unlink(missing_ok=True)
+            session = SESSIONS.pop(upload_id, None)
+            if session:
+                for article_id in session.article_ids:
+                    article = ARTICLES.pop(article_id, None)
+                    if article:
+                        for stored_path, directory in ((article.path, config.UPLOAD_DIR), (article.thumbnail_path, config.THUMBNAIL_DIR)):
+                            path = Path(stored_path)
+                            if path.parent == directory:
+                                path.unlink(missing_ok=True)
+            raise HTTPException(status_code=429, detail=str(exc)) from exc
+    finally:
+        release_media_slot()
     return {
         "job_id": job.id,
         "upload_id": upload_id,
@@ -405,14 +472,14 @@ def demo(duration: float = 10.0):
 
 
 def _load_job(job_id: str) -> Job:
-    job = JOBS.get(job_id)
+    job = cached_job(job_id)
     if job:
         return job
     path = job_path(job_id)
     if path.is_file():
         try:
             job = job_from_payload(json.loads(path.read_text(encoding="utf-8")))
-            JOBS[job.id] = job
+            cache_job(job)
             return job
         except (OSError, json.JSONDecodeError, TypeError, ValueError):
             logger.exception("Could not read persisted job %s", job_id)
@@ -477,10 +544,14 @@ def feedback(request: FeedbackRequest, req: Request):
 @router.post("/search")
 def search(request: SearchRequest):
     word = _target(request.target_word)
+    if not try_acquire_media_slot():
+        raise HTTPException(status_code=429, detail="Another upload, OCR task, or render is using the media worker. Try again when it finishes.")
     try:
         session, added = acquire_sources(word, request.number_of_articles)
     except (RuntimeError, httpx.HTTPError, ValueError) as exc:
         raise HTTPException(status_code=502, detail=f"Automatic source acquisition failed: {str(exc)[:220]}") from exc
+    finally:
+        release_media_slot()
     payload = _analysis_payload(session.id, word, added)
     providers = "GDELT DOC and Bing News RSS"
     if config.NEWSAPI_KEY:

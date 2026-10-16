@@ -132,16 +132,14 @@ def _cheap_blur(image: Image.Image, radius: float) -> Image.Image:
         Image.Resampling.BILINEAR,
     )
 
-    small = small.filter(
-        ImageFilter.GaussianBlur(
-            radius=max(0.6, radius / scale)
-        )
-    )
-
-    return small.resize(
-        image.size,
-        Image.Resampling.BILINEAR,
-    )
+    softened = None
+    try:
+        softened = small.filter(ImageFilter.GaussianBlur(radius=max(0.6, radius / scale)))
+        return softened.resize(image.size, Image.Resampling.BILINEAR)
+    finally:
+        small.close()
+        if softened is not None:
+            softened.close()
 
 
 def _prepare_source(
@@ -149,36 +147,30 @@ def _prepare_source(
     width: int,
     height: int,
 ):
-    with Image.open(article.path) as image:
-        source = ImageOps.exif_transpose(image).convert("RGB")
-
     if not article.bbox:
         raise ValueError(
             f"{article.filename}: no target word box is available."
         )
+
+    max_edge = max(width, height) * 2
+    with Image.open(article.path) as image:
+        oriented = ImageOps.exif_transpose(image)
+        original_width, original_height = oriented.size
+        oriented.thumbnail((max_edge, max_edge), Image.Resampling.BILINEAR)
+        source_work = oriented.copy()
+        if oriented is not image:
+            oriented.close()
 
     bbox = [
         float(value)
         for value in article.bbox
     ]
 
-    max_edge = max(width, height) * 2
-
-    if max(source.size) > max_edge:
-        scale = max_edge / max(source.size)
-
-        source = source.resize(
-            (
-                max(2, round(source.width * scale)),
-                max(2, round(source.height * scale)),
-            ),
-            Image.Resampling.BILINEAR,
-        )
-
-        bbox = [
-            value * scale
-            for value in bbox
-        ]
+    scale_x = source_work.width / max(original_width, 1)
+    scale_y = source_work.height / max(original_height, 1)
+    bbox = [bbox[0] * scale_x, bbox[1] * scale_y, bbox[2] * scale_x, bbox[3] * scale_y]
+    source = source_work.convert("RGB")
+    source_work.close()
 
     bbox[0] = max(
         0.0,
@@ -200,7 +192,7 @@ def _prepare_source(
         min(bbox[3], source.height - bbox[1]),
     )
 
-    background = ImageOps.fit(
+    fitted = ImageOps.fit(
         source,
         (width, height),
         method=Image.Resampling.BILINEAR,
@@ -210,9 +202,10 @@ def _prepare_source(
         ),
     )
 
-    background = ImageEnhance.Brightness(
-        _cheap_blur(background, 42)
-    ).enhance(0.96)
+    blurred = _cheap_blur(fitted, 42)
+    fitted.close()
+    background = ImageEnhance.Brightness(blurred).enhance(0.96)
+    blurred.close()
 
     return source, bbox, background
 
@@ -258,19 +251,32 @@ def _draw_marker(
         upper.append((x, max(0, min(patch_height - 1, top_edge))))
         lower.append((x, max(0, min(patch_height - 1, bottom_edge))))
     brush.polygon(upper + list(reversed(lower)), fill=255)
-    mask = mask.filter(ImageFilter.GaussianBlur(radius=1.0))
-
-    mask_values = np.asarray(mask, dtype=np.float32)
-    row_texture = rng.uniform(0.88, 1.04, size=(patch_height, 1)).astype(np.float32)
-    texture = rng.uniform(0.82, 1.0, size=mask_values.shape).astype(np.float32) * row_texture
+    softened_mask = mask.filter(ImageFilter.GaussianBlur(radius=1.0))
+    mask.close()
     original = frame.crop((left, top, right, bottom))
-    pixels = np.asarray(original, dtype=np.float32)
-    luminance = pixels[..., 0] * 0.2126 + pixels[..., 1] * 0.7152 + pixels[..., 2] * 0.0722
-    ink_visibility = 0.42 + 0.58 * np.clip(luminance / 220.0, 0.0, 1.0)
-    alpha = np.clip(mask_values * texture * 0.88 * ink_visibility, 0, 255).astype(np.uint8)
     color = Image.new("RGB", (patch_width, patch_height), (255, 226, 24))
-    marker = Image.composite(color, original, Image.fromarray(alpha, mode="L"))
-    frame.paste(marker, (left, top))
+    alpha_image = None
+    marker = None
+    try:
+        mask_values = np.asarray(softened_mask, dtype=np.float32)
+        row_texture = rng.uniform(0.88, 1.04, size=(patch_height, 1)).astype(np.float32)
+        texture = rng.uniform(0.82, 1.0, size=mask_values.shape).astype(np.float32) * row_texture
+        pixels = np.asarray(original, dtype=np.float32)
+        luminance = pixels[..., 0] * 0.2126 + pixels[..., 1] * 0.7152 + pixels[..., 2] * 0.0722
+        ink_visibility = 0.42 + 0.58 * np.clip(luminance / 220.0, 0.0, 1.0)
+        alpha = np.clip(mask_values * texture * 0.88 * ink_visibility, 0, 255).astype(np.uint8)
+        alpha_image = Image.fromarray(alpha, mode="L")
+        marker = Image.composite(color, original, alpha_image)
+        frame.paste(marker, (left, top))
+        del mask_values, row_texture, texture, pixels, luminance, ink_visibility, alpha
+    finally:
+        softened_mask.close()
+        original.close()
+        color.close()
+        if alpha_image is not None:
+            alpha_image.close()
+        if marker is not None:
+            marker.close()
     return frame
 
 
@@ -361,18 +367,14 @@ def _focus_falloff(
         fill=255,
     )
 
-    mask = _cheap_blur(
-        mask,
-        max(48, round(frame.height * 0.045)),
-    )
-
+    softened_mask = _cheap_blur(mask, max(48, round(frame.height * 0.045)))
+    mask.close()
     softened = _cheap_blur(frame, 4.6 * max(0.0, blur_intensity))
-
-    return Image.composite(
-        frame,
-        softened,
-        mask,
-    )
+    try:
+        return Image.composite(frame, softened, softened_mask)
+    finally:
+        softened.close()
+        softened_mask.close()
 
 
 def _compose_page_frame(
@@ -389,7 +391,7 @@ def _compose_page_frame(
         width,
         height,
     )
-
+    frame = None
     try:
         reveal = (
             1.0
@@ -409,14 +411,18 @@ def _compose_page_frame(
             blur_intensity=blur_intensity,
         )
 
-        return _draw_caption(
+        result = _draw_caption(
             frame,
             caption,
         )
+        frame = None
+        return result
 
     finally:
         source.close()
         background.close()
+        if frame is not None:
+            frame.close()
 
 
 def _make_frame(
@@ -458,83 +464,64 @@ def _make_frame(
         top,
     )
 
-    visible = source.transform(
-        (width, height),
-        Image.Transform.AFFINE,
-        affine,
-        resample=Image.Resampling.BICUBIC,
-        fillcolor=(0, 0, 0),
-    )
+    visible = None
+    source_mask = None
+    frame = None
+    shadow_mask = None
+    shadow_layer = None
+    inverted_shadow = None
+    paper_tone = None
+    try:
+        visible = source.transform(
+            (width, height), Image.Transform.AFFINE, affine,
+            resample=Image.Resampling.BICUBIC, fillcolor=(0, 0, 0),
+        )
+        base_mask = Image.new("L", source.size, 255)
+        try:
+            source_mask = base_mask.transform(
+                (width, height), Image.Transform.AFFINE, affine,
+                resample=Image.Resampling.BICUBIC, fillcolor=0,
+            )
+        finally:
+            base_mask.close()
 
-    source_mask = Image.new(
-        "L",
-        source.size,
-        255,
-    ).transform(
-        (width, height),
-        Image.Transform.AFFINE,
-        affine,
-        resample=Image.Resampling.BICUBIC,
-        fillcolor=0,
-    )
+        frame = background.copy()
+        # Subtle drop shadow behind the source page.
+        shadow_mask = source_mask.filter(ImageFilter.GaussianBlur(radius=5.0))
+        shadow_layer = Image.new("RGB", (width, height), (30, 28, 24))
+        inverted_shadow = ImageOps.invert(shadow_mask)
+        composited = Image.composite(frame, shadow_layer, inverted_shadow)
+        frame.close()
+        frame = composited
+        frame.paste(visible, (0, 0), source_mask)
 
-    frame = background.copy()
-
-    # Subtle drop shadow behind the source page
-    shadow_mask = source_mask.filter(ImageFilter.GaussianBlur(radius=5.0))
-    shadow_layer = Image.new("RGB", (width, height), (30, 28, 24))
-    frame = Image.composite(frame, shadow_layer, ImageOps.invert(shadow_mask))
-
-    frame.paste(
-        visible,
-        (0, 0),
-        source_mask,
-    )
-
-    screen_box = (
-        (width - target_width) / 2,
-        (height - target_height) / 2,
-        (width + target_width) / 2,
-        (height + target_height) / 2,
-    )
-
-    paper_tone = Image.new(
-        "RGB",
-        frame.size,
-        (247, 243, 231),
-    )
-
-    frame = Image.blend(
-        frame,
-        paper_tone,
-        0.045,
-    )
-
-    frame = _focus_falloff(
-        frame,
-        screen_box,
-        blur_intensity,
-    )
-
-    if highlight_mode in {"default", "highlight"}:
-        return _draw_marker(
-            frame,
-            screen_box,
-            1.0
-            if highlight_mode == "default"
-            else reveal_fraction,
+        screen_box = (
+            (width - target_width) / 2,
+            (height - target_height) / 2,
+            (width + target_width) / 2,
+            (height + target_height) / 2,
         )
 
-    if highlight_mode == "underline":
-        return _draw_underline(
-            frame,
-            screen_box,
-            reveal_fraction,
-        )
+        paper_tone = Image.new("RGB", frame.size, (247, 243, 231))
+        blended = Image.blend(frame, paper_tone, 0.045)
+        frame.close()
+        frame = blended
+        focused = _focus_falloff(frame, screen_box, blur_intensity)
+        frame.close()
+        frame = focused
 
-    raise ValueError(
-        f"Unsupported highlight mode: {highlight_mode}"
-    )
+        if highlight_mode in {"default", "highlight"}:
+            result = _draw_marker(frame, screen_box, 1.0 if highlight_mode == "default" else reveal_fraction)
+        elif highlight_mode == "underline":
+            result = _draw_underline(frame, screen_box, reveal_fraction)
+        else:
+            raise ValueError(f"Unsupported highlight mode: {highlight_mode}")
+        frame = None  # The caller owns the returned image from this point.
+        return result
+    finally:
+        for image in (visible, source_mask, shadow_mask, shadow_layer, inverted_shadow, paper_tone, frame):
+            if image is not None:
+                image.close()
 
 
 def _zoom_frame(
@@ -771,6 +758,40 @@ def _draw_caption(
     )
 
     return frame
+
+
+def _write_rgb_frame(
+    page_frame: Image.Image,
+    frame_sink,
+    width: int,
+    height: int,
+    screen_box: tuple[float, float, float, float],
+    highlight_mode: str,
+    reveal_fraction: float,
+    camera_scale: float,
+    shake_x: float,
+    shake_y: float,
+) -> None:
+    """Write one RGB24 frame and release its full-size buffers immediately."""
+    frame = page_frame.copy()
+    raw_frame = None
+    try:
+        if highlight_mode == "highlight":
+            _draw_marker(frame, screen_box, reveal_fraction)
+        elif highlight_mode == "underline":
+            _draw_underline(frame, screen_box, reveal_fraction)
+        zoomed = _zoom_frame(frame, camera_scale, shake_x, shake_y)
+        if zoomed is not frame:
+            frame.close()
+            frame = zoomed
+        raw_frame = frame.tobytes("raw", "RGB")
+        expected_bytes = width * height * 3
+        if len(raw_frame) != expected_bytes:
+            raise RuntimeError(f"Invalid raw frame size: got {len(raw_frame)} bytes, expected {expected_bytes} bytes for {width}x{height} RGB24.")
+        frame_sink.write(raw_frame)
+    finally:
+        raw_frame = None
+        frame.close()
 
 
 def _sound_style(
@@ -1217,8 +1238,6 @@ def render_video(
                     total_frames,
                 )
 
-                frame = page_frame.copy()
-
                 target_box = target_boxes[
                     article_index
                 ]
@@ -1229,23 +1248,6 @@ def render_video(
                     (width + target_box[0]) / 2,
                     (height + target_box[1]) / 2,
                 )
-
-                # IMPORTANT:
-                # Assign the returned frame.
-                # Previously these return values were ignored.
-                if highlight_mode == "highlight":
-                    frame = _draw_marker(
-                        frame,
-                        screen_box,
-                        timeline_progress,
-                    )
-
-                elif highlight_mode == "underline":
-                    frame = _draw_underline(
-                        frame,
-                        screen_box,
-                        timeline_progress,
-                    )
 
                 if highlight_mode == "default":
                     page_t = max(0.0, min(1.0, page_progress))
@@ -1264,41 +1266,18 @@ def render_video(
                     shake_x = 0.0
                     shake_y = 0.0
 
-                frame = _zoom_frame(
-                    frame,
+                _write_rgb_frame(
+                    page_frame,
+                    process.stdin,
+                    width,
+                    height,
+                    screen_box,
+                    highlight_mode,
+                    timeline_progress,
                     camera_scale,
                     shake_x,
                     shake_y,
                 )
-
-                # ---------------------------------------------------------
-                # Send EXACT RGB24 bytes to FFmpeg.
-                # ---------------------------------------------------------
-                raw_frame = frame.tobytes(
-                    "raw",
-                    "RGB",
-                )
-
-                expected_bytes = (
-                    width
-                    * height
-                    * 3
-                )
-
-                if len(raw_frame) != expected_bytes:
-                    raise RuntimeError(
-                        "Invalid raw frame size: "
-                        f"got {len(raw_frame)} bytes, "
-                        f"expected {expected_bytes} bytes "
-                        f"for {width}x{height} RGB24."
-                    )
-
-                process.stdin.write(
-                    raw_frame
-                )
-                process.stdin.flush()
-
-                frame.close()
 
                 if progress and (
                     frame_index
@@ -1350,12 +1329,19 @@ def render_video(
             if page_frame is not None:
                 page_frame.close()
 
+            if process.stdin and not process.stdin.closed:
+                try:
+                    process.stdin.close()
+                except OSError:
+                    pass
+
             stderr_thread.join(
                 timeout=5
             )
 
             if process.stderr:
                 process.stderr.close()
+            gc.collect()
 
         stderr = (
             b"".join(

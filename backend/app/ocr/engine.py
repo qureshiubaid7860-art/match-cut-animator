@@ -4,6 +4,7 @@ import re
 import random
 import threading
 import unicodedata
+import gc
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageOps
@@ -27,10 +28,25 @@ def _get_engine():
     if _engine is None:
         try:
             from rapidocr import RapidOCR
-            _engine = RapidOCR(params={"Rec.lang_type": "en"})
+            _engine = RapidOCR(params={
+                "Rec.lang_type": "en",
+                "EngineConfig.onnxruntime.intra_op_num_threads": 1,
+                "EngineConfig.onnxruntime.inter_op_num_threads": 1,
+                "EngineConfig.onnxruntime.enable_cpu_mem_arena": False,
+            })
         except ImportError as exc:
             raise RuntimeError("OCR dependencies are not installed. Run `pip install -r requirements.txt` in the project environment.") from exc
     return _engine
+
+
+def release_engine() -> None:
+    """Drop the OCR session after a batch so rendering can reclaim its memory."""
+    global _engine
+    with _engine_lock:
+        engine = _engine
+        _engine = None
+    del engine
+    gc.collect()
 
 
 def _outputs(result):
@@ -125,102 +141,144 @@ def _score(confidence: float, bbox: list[float], image_size: tuple[int, int]) ->
 
 def analyze_image(image_path: str | Path, target_word: str) -> dict:
     path = Path(image_path)
-    with Image.open(path) as source:
-        image = ImageOps.exif_transpose(source).convert("RGB")
-        original_size = image.size
-        # OCR works on a maximum 2000 px long edge; map boxes back to source pixels.
-        image.thumbnail((2000, 2000), Image.Resampling.LANCZOS)
-        ocr_scale_x = original_size[0] / image.width
-        ocr_scale_y = original_size[1] / image.height
+    image = None
+    working = None
+    ocr_image = None
+    output = None
+    try:
+        with Image.open(path) as source:
+            oriented = ImageOps.exif_transpose(source)
+            original_size = oriented.size
+            oriented.thumbnail((1800, 1800), Image.Resampling.LANCZOS)
+            working = oriented.copy()
+            if oriented is not source:
+                oriented.close()
+        # Resize before RGB conversion to keep the OCR working copy bounded.
+        ocr_scale_x = original_size[0] / working.width
+        ocr_scale_y = original_size[1] / working.height
+        image = working.convert("RGB")
+        working.close()
         import numpy as np
         ocr_image = np.asarray(image)
-    with _engine_lock:
-        output = _get_engine()(ocr_image, return_word_box=True)
-    polygons, texts, scores, word_results = _outputs(output)
-    match_candidates = []
-    detected_text = []
-    detections = []
-    wanted = normalized_terms(target_word)
-    for row_index, (polygon, text, confidence) in enumerate(zip(polygons, texts, scores)):
-        text = str(text or "")
-        if text:
-            detected_text.append(text)
-        confidence = float(confidence or 0.0)
-        try:
-            line_box = _box_from_polygon(polygon)
-        except (TypeError, ValueError, IndexError):
-            continue
-        full_box = [round(line_box[0] * ocr_scale_x, 2), round(line_box[1] * ocr_scale_y, 2), round(line_box[2] * ocr_scale_x, 2), round(line_box[3] * ocr_scale_y, 2)]
-        if len(detections) < 1500:
-            detections.append({"text": text, "bbox": full_box, "confidence": max(0.0, min(1.0, confidence))})
-        # Match complete Unicode tokens, and contiguous short phrases, never substrings.
-        exact_boxes: list[tuple[str, tuple[float, float, float, float], float, str]] = []
-        if row_index < len(word_results):
-            for word_item in word_results[row_index] or []:
-                if not isinstance(word_item, (tuple, list)) or len(word_item) < 3:
-                    continue
-                token_text, token_score, token_polygon = word_item[0], word_item[1], word_item[2]
-                if token_polygon is None:
-                    continue
-                try:
-                    exact_boxes.append((normalize_token(str(token_text)), _box_from_polygon(token_polygon), float(token_score or confidence), str(token_text)))
-                except (TypeError, ValueError, IndexError):
-                    pass
-        tokens = list(re.finditer(r"[^\W_]+", text, flags=re.UNICODE))
-        if not wanted or len(tokens) < len(wanted):
-            continue
-        for start in range(len(tokens) - len(wanted) + 1):
-            end = start + len(wanted) - 1
-            if [normalize_token(token.group(0)) for token in tokens[start:end + 1]] != wanted:
+        with _engine_lock:
+            output = _get_engine()(ocr_image, return_word_box=True)
+        polygons, texts, scores, word_results = _outputs(output)
+        match_candidates = []
+        detected_text = []
+        detections = []
+        wanted = normalized_terms(target_word)
+        for row_index, (polygon, text, confidence) in enumerate(zip(polygons, texts, scores)):
+            text = str(text or "")
+            if text:
+                detected_text.append(text)
+            confidence = float(confidence or 0.0)
+            try:
+                line_box = _box_from_polygon(polygon)
+            except (TypeError, ValueError, IndexError):
                 continue
-            box, exact_confidence, matched_text = _phrase_box(text, tokens, start, end, line_box, exact_boxes)
-            box = [box[0] * ocr_scale_x, box[1] * ocr_scale_y, box[2] * ocr_scale_x, box[3] * ocr_scale_y]
-            token_confidence = exact_confidence or confidence
-            match_candidates.append({
-                "bbox": [round(value, 2) for value in box],
-                "confidence": max(0.0, min(1.0, token_confidence)),
-                "text": matched_text,
-                "score": _score(token_confidence, box, original_size),
-            })
-    match_candidates.sort(key=lambda candidate: candidate["score"], reverse=True)
-    return {
-        "detected_text": "\n".join(detected_text),
-        "matches": match_candidates,
-        "detections": detections,
-        "selected": match_candidates[0] if match_candidates else None,
-        "image_width": original_size[0],
-        "image_height": original_size[1],
-    }
+            full_box = [round(line_box[0] * ocr_scale_x, 2), round(line_box[1] * ocr_scale_y, 2), round(line_box[2] * ocr_scale_x, 2), round(line_box[3] * ocr_scale_y, 2)]
+            if len(detections) < 200:
+                detections.append({"text": text, "bbox": full_box, "confidence": max(0.0, min(1.0, confidence))})
+            # Match complete Unicode tokens, and contiguous short phrases, never substrings.
+            exact_boxes: list[tuple[str, tuple[float, float, float, float], float, str]] = []
+            if row_index < len(word_results):
+                for word_item in word_results[row_index] or []:
+                    if not isinstance(word_item, (tuple, list)) or len(word_item) < 3:
+                        continue
+                    token_text, token_score, token_polygon = word_item[0], word_item[1], word_item[2]
+                    if token_polygon is None:
+                        continue
+                    try:
+                        exact_boxes.append((normalize_token(str(token_text)), _box_from_polygon(token_polygon), float(token_score or confidence), str(token_text)))
+                    except (TypeError, ValueError, IndexError):
+                        pass
+            tokens = list(re.finditer(r"[^\W_]+", text, flags=re.UNICODE))
+            if not wanted or len(tokens) < len(wanted):
+                continue
+            for start in range(len(tokens) - len(wanted) + 1):
+                end = start + len(wanted) - 1
+                if [normalize_token(token.group(0)) for token in tokens[start:end + 1]] != wanted:
+                    continue
+                box, exact_confidence, matched_text = _phrase_box(text, tokens, start, end, line_box, exact_boxes)
+                box = [box[0] * ocr_scale_x, box[1] * ocr_scale_y, box[2] * ocr_scale_x, box[3] * ocr_scale_y]
+                token_confidence = exact_confidence or confidence
+                if len(match_candidates) < 100:
+                    match_candidates.append({
+                        "bbox": [round(value, 2) for value in box],
+                        "confidence": max(0.0, min(1.0, token_confidence)),
+                        "text": matched_text,
+                        "score": _score(token_confidence, box, original_size),
+                    })
+        match_candidates.sort(key=lambda candidate: candidate["score"], reverse=True)
+        return {
+            "detected_text": "\n".join(detected_text),
+            "matches": match_candidates,
+            "detections": detections,
+            "selected": match_candidates[0] if match_candidates else None,
+            "image_width": original_size[0],
+            "image_height": original_size[1],
+        }
+    finally:
+        if working is not None:
+            working.close()
+        if ocr_image is not None:
+            del ocr_image
+        if image is not None:
+            image.close()
+        if output is not None:
+            del output
 
 
 def write_box_thumbnail(image_path: str | Path, thumbnail_path: str | Path, bbox: list[float] | None) -> None:
     with Image.open(image_path) as source:
-        image = ImageOps.exif_transpose(source).convert("RGB")
+        oriented = ImageOps.exif_transpose(source)
+        image = oriented.convert("RGB")
+        if oriented is not source:
+            oriented.close()
+        original_width, original_height = image.size
         image.thumbnail((500, 620), Image.Resampling.LANCZOS)
         canvas = Image.new("RGB", (500, 620), "#ded9cb")
-        x_offset = (500 - image.width) // 2
-        y_offset = (620 - image.height) // 2
-        canvas.paste(image, (x_offset, y_offset))
-        if bbox:
-            scale = image.width / source.width
-            rect = (
-                x_offset + bbox[0] * scale,
-                y_offset + bbox[1] * scale,
-                x_offset + (bbox[0] + bbox[2]) * scale,
-                y_offset + (bbox[1] + bbox[3]) * scale,
-            )
-            x1, y1, x2, y2 = rect
-            stroke_height = max(3, (y2 - y1) * 0.76)
-            stroke_width = max(7, (x2 - x1) * 1.10)
-            stroke = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
-            marker = ImageDraw.Draw(stroke)
-            rng = random.Random(913)
-            top = []
-            bottom = []
-            for index in range(9):
-                x = x1 - (stroke_width - (x2 - x1)) / 2 + stroke_width * index / 8
-                top.append((x, y1 + (y2 - y1) * 0.12 + rng.uniform(-0.8, 0.8)))
-                bottom.append((x, y1 + (y2 - y1) * 0.12 + stroke_height + rng.uniform(-0.8, 0.8)))
-            marker.polygon(top + list(reversed(bottom)), fill=(246, 222, 73, 93))
-            canvas = Image.alpha_composite(canvas.convert("RGBA"), stroke).convert("RGB")
-        canvas.save(thumbnail_path, "JPEG", quality=84, optimize=True)
+        stroke = None
+        converted = None
+        composite = None
+        try:
+            x_offset = (500 - image.width) // 2
+            y_offset = (620 - image.height) // 2
+            canvas.paste(image, (x_offset, y_offset))
+            if bbox:
+                scale_x = image.width / max(original_width, 1)
+                scale_y = image.height / max(original_height, 1)
+                rect = (
+                    x_offset + bbox[0] * scale_x,
+                    y_offset + bbox[1] * scale_y,
+                    x_offset + (bbox[0] + bbox[2]) * scale_x,
+                    y_offset + (bbox[1] + bbox[3]) * scale_y,
+                )
+                x1, y1, x2, y2 = rect
+                stroke_height = max(3, (y2 - y1) * 0.76)
+                stroke_width = max(7, (x2 - x1) * 1.10)
+                stroke = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+                marker = ImageDraw.Draw(stroke)
+                rng = random.Random(913)
+                top = []
+                bottom = []
+                for index in range(9):
+                    x = x1 - (stroke_width - (x2 - x1)) / 2 + stroke_width * index / 8
+                    top.append((x, y1 + (y2 - y1) * 0.12 + rng.uniform(-0.8, 0.8)))
+                    bottom.append((x, y1 + (y2 - y1) * 0.12 + stroke_height + rng.uniform(-0.8, 0.8)))
+                marker.polygon(top + list(reversed(bottom)), fill=(246, 222, 73, 93))
+                converted = canvas.convert("RGBA")
+                composite = Image.alpha_composite(converted, stroke)
+                updated = composite.convert("RGB")
+                canvas.close()
+                canvas = updated
+            canvas.save(thumbnail_path, "JPEG", quality=84, optimize=True)
+        finally:
+            image.close()
+            canvas.close()
+            if stroke is not None:
+                stroke.close()
+            if converted is not None:
+                converted.close()
+            if composite is not None:
+                composite.close()

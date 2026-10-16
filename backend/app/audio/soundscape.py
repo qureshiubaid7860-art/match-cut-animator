@@ -90,52 +90,60 @@ def build_audio(
     sample_rate: int = 48000,
     sfx_id: str = "click",
 ) -> None:
-    """Mix the selected SFX asset onto the exact frame-locked cut timeline."""
+    """Mix a frame-locked WAV in bounded chunks without a duration-sized array."""
     sample_count = round(duration * sample_rate)
-    mix = np.zeros(sample_count, dtype=np.float32)
     style = canonical_sound_style(sound_style)
     preset = SOUND_PRESETS[style]
     if sfx_id != "none" and sfx_id not in SFX_ASSETS:
         raise ValueError(f"Unsupported sound-effect ID: {sfx_id}")
+    effect_asset = _read_sfx(sfx_id, sample_rate) if sfx_id != "none" and sfx_enabled and sfx_volume else None
+    chunk_size = 24_000
+    bed_enabled = bool(sfx_id != "none" and background_enabled and background_volume and sample_count)
 
-    if sfx_id != "none" and background_enabled and background_volume and sample_count:
-        t = np.arange(sample_count, dtype=np.float32) / sample_rate
+    def chunks():
         rng = np.random.default_rng(4042)
-        noise = rng.normal(0.0, 1.0, sample_count).astype(np.float32)
-        texture = np.convolve(noise, np.ones(41, dtype=np.float32) / 41, mode="same")
-        tone_hz = preset["tone_hz"]
-        tonal_bed = (
-            np.sin(2 * np.pi * tone_hz * t)
-            + 0.36 * np.sin(2 * np.pi * (tone_hz * 1.5) * t)
-            if tone_hz else np.zeros(sample_count, dtype=np.float32)
-        )
-        bed = tonal_bed * preset["tone_level"] + texture * preset["bed_texture"]
-        bed *= background_volume / 100.0
-        bed *= 0.035 if style == "minimal" else 0.055
-        mix += bed.astype(np.float32)
+        tail = np.zeros(40, dtype=np.float32)
+        kernel = np.full(41, 1.0 / 41, dtype=np.float32)
+        for start in range(0, sample_count, chunk_size):
+            end = min(sample_count, start + chunk_size)
+            length = end - start
+            mix = np.zeros(length, dtype=np.float32)
+            if bed_enabled:
+                noise = rng.normal(0.0, 1.0, length).astype(np.float32)
+                noise_with_history = np.concatenate((tail, noise))
+                texture = np.convolve(noise_with_history, kernel, mode="valid")
+                tail = noise_with_history[-40:].copy()
+                t = np.arange(start, end, dtype=np.float32) / sample_rate
+                tone_hz = preset["tone_hz"]
+                if tone_hz:
+                    tonal_bed = np.sin(2 * np.pi * tone_hz * t)
+                    tonal_bed += 0.36 * np.sin(2 * np.pi * (tone_hz * 1.5) * t)
+                    mix += tonal_bed * preset["tone_level"]
+                mix += texture * preset["bed_texture"]
+                mix *= background_volume / 100.0
+                mix *= 0.035 if style == "minimal" else 0.055
+            if effect_asset is not None:
+                for cut_number, frame in enumerate(cut_frames):
+                    event_start = round(frame * sample_rate / fps)
+                    next_start = round(cut_frames[cut_number + 1] * sample_rate / fps) if cut_number + 1 < len(cut_frames) else sample_count
+                    event_end = min(event_start + effect_asset.size, next_start, sample_count)
+                    overlap_start = max(start, event_start)
+                    overlap_end = min(end, event_end)
+                    if overlap_start < overlap_end:
+                        source_start = overlap_start - event_start
+                        mix[overlap_start - start:overlap_end - start] += effect_asset[source_start:source_start + overlap_end - overlap_start] * (sfx_volume / 100.0)
+            yield mix
 
-    if sfx_id != "none" and sfx_enabled and sfx_volume:
-        effect_asset = _read_sfx(sfx_id, sample_rate)
-        for cut_number, frame in enumerate(cut_frames):
-            # Snap the sound event to the first audio sample of this video frame.
-            start = round(frame * sample_rate / fps)
-            if start >= sample_count:
-                continue
-            next_start = (
-                round(cut_frames[cut_number + 1] * sample_rate / fps)
-                if cut_number + 1 < len(cut_frames) else sample_count
-            )
-            length = min(effect_asset.size, sample_count - start, next_start - start)
-            if length <= 0:
-                continue
-            mix[start:start + length] += effect_asset[:length] * (sfx_volume / 100.0)
-
-    peak = float(np.max(np.abs(mix))) if sample_count else 0.0
-    if peak > 0.82:
-        mix *= 0.82 / peak
-    pcm = (np.clip(mix, -1.0, 1.0) * 32767).astype("<i2")
+    # Determine one global limiter value in a first bounded-memory pass.
+    peak = 0.0
+    for mix_chunk in chunks():
+        if mix_chunk.size:
+            peak = max(peak, float(np.max(np.abs(mix_chunk))))
+    gain = 0.82 / peak if peak > 0.82 else 1.0
     with wave.open(str(path), "wb") as wav:
         wav.setnchannels(1)
         wav.setsampwidth(2)
         wav.setframerate(sample_rate)
-        wav.writeframes(pcm.tobytes())
+        for mix_chunk in chunks():
+            pcm = (np.clip(mix_chunk * gain, -1.0, 1.0) * 32767).astype("<i2")
+            wav.writeframesraw(pcm.tobytes())

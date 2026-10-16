@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import hashlib
-import io
+import gc
 import math
 import random
 import re
 import threading
+import tempfile
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Callable
@@ -419,6 +419,26 @@ def _contains_exact_phrase(text: str, phrase: str) -> bool:
     return bool(wanted) and any(words[index:index + len(wanted)] == wanted for index in range(len(words) - len(wanted) + 1))
 
 
+def _blend_paper_texture(paper: Image.Image, noise_level: int, blur_radius: float, amount: float) -> Image.Image:
+    noise = Image.effect_noise(paper.size, noise_level)
+    softened = None
+    grain = None
+    grain_rgb = None
+    try:
+        softened = noise.filter(ImageFilter.GaussianBlur(blur_radius))
+        grain = softened.convert("L")
+        grain_rgb = Image.merge("RGB", (grain, grain, grain))
+        return Image.blend(paper, grain_rgb, amount)
+    finally:
+        noise.close()
+        if softened is not None:
+            softened.close()
+        if grain is not None:
+            grain.close()
+        if grain_rgb is not None:
+            grain_rgb.close()
+
+
 def _page_image(
     title: str,
     lead: str,
@@ -428,17 +448,18 @@ def _page_image(
     seed: int,
     target_word: str | None = None,
     masthead: str | None = None,
-) -> tuple[bytes, list[float] | None]:
+) -> tuple[Path, list[float] | None]:
     family_index, _ = _page_font_style(seed)
     width, height = 1500, 2100
     paper = Image.new("RGB", (width, height), "#eee8d8")
 
     # Fine fibers and low-contrast mottling make the page read as printed stock.
-    grain = Image.effect_noise((width, height), 42).filter(ImageFilter.GaussianBlur(0.35)).convert("L")
-    grain_rgb = Image.merge("RGB", (grain, grain, grain))
-    paper = Image.blend(paper, grain_rgb, 0.085)
-    mottling = Image.effect_noise((width, height), 36).filter(ImageFilter.GaussianBlur(9)).convert("L")
-    paper = Image.blend(paper, Image.merge("RGB", (mottling, mottling, mottling)), 0.06)
+    textured = _blend_paper_texture(paper, 42, 0.35, 0.085)
+    paper.close()
+    paper = textured
+    mottled = _blend_paper_texture(paper, 36, 9, 0.06)
+    paper.close()
+    paper = mottled
 
     # Faded, irregular edge wear; the center stays clear enough for OCR and reading.
     edge_wear = Image.new("RGBA", (width, height), (0, 0, 0, 0))
@@ -446,8 +467,16 @@ def _page_image(
     wear_draw.rectangle((0, 0, width, height), outline=(78, 67, 48, 18), width=20)
     wear_draw.line((18, 8, width - 30, 5), fill=(82, 70, 49, 10), width=7)
     wear_draw.line((9, 20, 12, height - 25), fill=(82, 70, 49, 9), width=8)
-    edge_wear = edge_wear.filter(ImageFilter.GaussianBlur(15))
-    paper = Image.alpha_composite(paper.convert("RGBA"), edge_wear).convert("RGB")
+    softened_edges = edge_wear.filter(ImageFilter.GaussianBlur(15))
+    edge_wear.close()
+    edge_wear = softened_edges
+    paper_rgba = paper.convert("RGBA")
+    composite = Image.alpha_composite(paper_rgba, edge_wear)
+    paper.close()
+    paper_rgba.close()
+    edge_wear.close()
+    paper = composite.convert("RGB")
+    composite.close()
 
     draw = ImageDraw.Draw(paper)
     ink, muted, accent = "#25241f", "#777366", "#8d3829"
@@ -775,23 +804,24 @@ def _page_image(
             anchor="ra",
         )
 
-    paper = paper.filter(
-        ImageFilter.GaussianBlur(radius=0.12)
-    )
+    softened_paper = paper.filter(ImageFilter.GaussianBlur(radius=0.12))
+    paper.close()
+    paper = softened_paper
 
-    image_bytes = io.BytesIO()
-    paper.save(
-        image_bytes,
-        "JPEG",
-        quality=93,
-        optimize=True,
-    )
-
-    return image_bytes.getvalue(), target_bbox
+    with tempfile.NamedTemporaryFile(prefix="matchcut-page-", suffix=".jpg", dir=config.WORK_DIR, delete=False) as temporary:
+        page_path = Path(temporary.name)
+    try:
+        paper.save(page_path, "JPEG", quality=93, optimize=True)
+    except Exception:
+        page_path.unlink(missing_ok=True)
+        raise
+    finally:
+        paper.close()
+    return page_path, target_bbox
 # yah tak 12345678
 
 
-def _real_page(story: dict, target: str, index: int) -> tuple[str, bytes, dict]:
+def _real_page(story: dict, target: str, index: int) -> tuple[str, Path, dict]:
     title = story["title"]
     lead = story["lead"]
     source_paragraphs = [paragraph for paragraph in story["paragraphs"] if paragraph != title]
@@ -1023,7 +1053,7 @@ _FICTIONAL_COLUMN_COPY = (
 )
 
 
-def _fictional_page(word: str, index: int) -> tuple[str, bytes, dict]:
+def _fictional_page(word: str, index: int) -> tuple[str, Path, dict]:
     section_index = (index // len(_FICTIONAL_HEADLINES)) % len(_FICTIONAL_SECTIONS)
     detail_index = (index // len(_FICTIONAL_LEADS)) % len(_FICTIONAL_LEAD_DETAILS)
     headline = f"{_FICTIONAL_HEADLINES[index % len(_FICTIONAL_HEADLINES)]}: {_FICTIONAL_SECTIONS[section_index]}"
@@ -1095,7 +1125,11 @@ def order_for_match_cuts(articles: list[Article]) -> list[Article]:
         if source_url and source_url in seen_sources:
             continue
         try:
-            page_digest = hashlib.sha256(Path(article.path).read_bytes()).hexdigest()
+            digest = hashlib.sha256()
+            with Path(article.path).open("rb") as page_file:
+                for chunk in iter(lambda: page_file.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            page_digest = digest.hexdigest()
         except OSError:
             page_digest = ""
         if page_digest and page_digest in seen_pages:
@@ -1162,30 +1196,32 @@ def acquire_sources(
             candidates = _candidate_records(target_word, requested_count, client)
     except httpx.HTTPError:
         candidates = []
+    real_limit = requested_count
+    source_scan_limit = min(len(candidates), max(12, real_limit * 2))
     if progress:
-        progress("02 — Downloading Sources", 14, f"Checking up to {len(candidates)} public article pages")
-
-    stories: list[dict] = []
-    if candidates:
-        with ThreadPoolExecutor(max_workers=6) as pool:
-            futures = [pool.submit(_read_article, candidate, target_word) for candidate in candidates]
-            for future in as_completed(futures):
-                story = future.result()
-                if story:
-                    stories.append(story)
-                if len(stories) >= requested_count * 2:
-                    break
+        progress("02 — Downloading Sources", 14, f"Checking up to {source_scan_limit} public article pages")
 
     added: list[Article] = []
-    real_limit = min(requested_count * 2, config.MAX_ARTICLES)
-    for index, story in enumerate(stories[:real_limit]):
+    for candidate_number, candidate in enumerate(candidates[:source_scan_limit], start=1):
+        if len(added) >= real_limit:
+            break
+        story = _read_article(candidate, target_word)
+        if not story:
+            continue
+        page_path = None
         try:
-            filename, payload, source = _real_page(story, target_word, index)
-            article = add_upload(session.id, filename, payload, source)[0]
+            filename, page_path, source = _real_page(story, target_word, len(added))
+            article = add_upload(session.id, filename, page_path, source)[0]
             session.article_ids.append(article.id)
             added.append(article)
         except (ValueError, OSError):
             continue
+        finally:
+            del story
+            if page_path is not None:
+                page_path.unlink(missing_ok=True)
+            if candidate_number % 3 == 0:
+                gc.collect()
 
     if progress:
         progress("03 — Running OCR", 31, f"Reading target-word positions on {len(added)} retrieved article pages")
@@ -1221,10 +1257,15 @@ def acquire_sources(
                 f"Found {len(matches)} public pages; creating {fallback_count} labeled editorial page(s) to reach {requested_count}",
             )
         for offset in range(fallback_count):
-            filename, payload, source = _fictional_page(target_word, len(matches) + offset)
-            if not source.get("found") or not source.get("bbox"):
-                raise RuntimeError("A generated page could not place the highlighted phrase.")
-            article = add_upload(session.id, filename, payload, source)[0]
+            page_path = None
+            try:
+                filename, page_path, source = _fictional_page(target_word, len(matches) + offset)
+                if not source.get("found") or not source.get("bbox"):
+                    raise RuntimeError("A generated page could not place the highlighted phrase.")
+                article = add_upload(session.id, filename, page_path, source)[0]
+            finally:
+                if page_path is not None:
+                    page_path.unlink(missing_ok=True)
             article.found = True
             article.text = target_word
             article.confidence = float(source.get("confidence") or 1.0)
@@ -1232,6 +1273,8 @@ def acquire_sources(
             article.analysis_target = target_word
             session.article_ids.append(article.id)
             matches.append(article)
+            if (offset + 1) % 3 == 0:
+                gc.collect()
 
     selected = order_for_match_cuts(matches)[:requested_count]
     if len(selected) != requested_count:
