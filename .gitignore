@@ -14,3 +14,6 @@ data/thumbnails/
 data/uploads/
 
 frontend/.env.development
+
+!frontend/public/demo-videos/*.mp4
+!frontend/dist/demo-videos/*.mp4
