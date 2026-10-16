@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Res
 
 from . import config
 from .api.routes import router
-from .jobs import recover_jobs, start_render_worker
+from .jobs import cleanup_expired_videos, recover_jobs, start_render_worker, start_video_cleanup
 
 logging.basicConfig(
     level=logging.INFO,
@@ -23,8 +23,10 @@ logger = logging.getLogger("matchcut")
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    cleanup_expired_videos()
     recover_jobs()
     start_render_worker()
+    start_video_cleanup()
     logger.info(
         "MATCH CUT ready output=%sx%s fps=%s timeout=%ss cors=%s",
         config.OUTPUT_WIDTH, config.OUTPUT_HEIGHT, config.DEFAULT_FPS, config.RENDER_TIMEOUT, config.CORS_ORIGINS,
@@ -41,7 +43,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(router)
-app.mount("/media", StaticFiles(directory=config.DATA_DIR), name="media")
+app.mount("/media/thumbnails", StaticFiles(directory=config.THUMBNAIL_DIR), name="thumbnails")
 
 FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 FRONTEND_ASSETS = FRONTEND_DIST / "assets"

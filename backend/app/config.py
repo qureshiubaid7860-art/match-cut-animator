@@ -54,6 +54,7 @@ NEWSAPI_KEY = os.getenv("NEWSAPI_KEY", "").strip()
 MAX_CONCURRENT_RENDERS = 1
 MAX_RENDER_QUEUE = 1
 RENDER_TIMEOUT = max(30.0, _float_from_env("RENDER_TIMEOUT", 600))
+VIDEO_RETENTION_SECONDS = max(60, min(86_400, _int_from_env("VIDEO_RETENTION_SECONDS", 3_600)))
 API_BASE_URL = os.getenv("API_BASE_URL", "").strip().rstrip("/")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "").strip().rstrip("/")
 CORS_ORIGINS = [

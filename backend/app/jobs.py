@@ -5,6 +5,7 @@ import logging
 import queue
 import threading
 import gc
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -18,11 +19,42 @@ GenerationHandler = Callable[[Job, Any], None]
 _handler: GenerationHandler | None = None
 _queue: queue.Queue[tuple[Job, Any]] = queue.Queue(maxsize=config.MAX_RENDER_QUEUE)
 _worker_started = threading.Event()
+_video_cleanup_started = threading.Event()
 _active_renders = 0
 _active_lock = threading.Lock()
 _media_lock = threading.Lock()
 _job_cache_lock = threading.RLock()
 MAX_CACHED_JOBS = 80
+
+
+def cleanup_expired_videos() -> None:
+    """Remove temporary renders that were not downloaded before their TTL."""
+    cutoff = time.time() - config.VIDEO_RETENTION_SECONDS
+    for directory, pattern in (
+        (config.WORK_DIR, "matchcut-video-*.mp4"),
+        (config.OUTPUT_DIR, "*.mp4"),  # clean old persistent renders from prior versions
+    ):
+        for path in directory.glob(pattern):
+            try:
+                if path.stat().st_mtime < cutoff:
+                    path.unlink(missing_ok=True)
+                    logger.info("removed expired temporary video %s", path.name)
+            except OSError:
+                logger.warning("could not remove expired temporary video %s", path, exc_info=True)
+
+
+def _video_cleanup_loop() -> None:
+    while True:
+        time.sleep(60)
+        cleanup_expired_videos()
+
+
+def start_video_cleanup() -> None:
+    if _video_cleanup_started.is_set():
+        return
+    thread = threading.Thread(target=_video_cleanup_loop, name="matchcut-video-cleanup", daemon=True)
+    thread.start()
+    _video_cleanup_started.set()
 
 
 def try_acquire_media_slot() -> bool:
@@ -67,6 +99,7 @@ def persist_job(job: Job) -> None:
         "message": job.message,
         "error": job.error,
         "video_path": job.video_path,
+        "video_downloaded": job.video_downloaded,
         "sources": job.sources,
         "metadata": job.metadata,
         "events": job.events[-40:],
@@ -89,6 +122,7 @@ def job_from_payload(payload: dict[str, Any]) -> Job:
         message=str(payload.get("message") or ""),
         error=payload.get("error"),
         video_path=payload.get("video_path"),
+        video_downloaded=bool(payload.get("video_downloaded", False)),
         sources=list(payload.get("sources") or []),
         metadata=dict(payload.get("metadata") or {}),
         events=list(payload.get("events") or []),

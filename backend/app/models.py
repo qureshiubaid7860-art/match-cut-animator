@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any
 
 
@@ -75,6 +76,7 @@ class Job:
     message: str = "Waiting to start"
     error: str | None = None
     video_path: str | None = None
+    video_downloaded: bool = False
     sources: list[dict[str, Any]] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
     events: list[dict[str, Any]] = field(default_factory=list)
@@ -91,10 +93,15 @@ class Job:
         }
 
     def public_result(self) -> dict[str, Any]:
+        video_available = bool(
+            self.video_path
+            and not self.video_downloaded
+            and Path(self.video_path).is_file()
+        )
         return {
             "job_id": self.id,
             "status": self.status,
-            "video_url": f"/media/output/{self.id}.mp4" if self.video_path else None,
+            "video_url": f"/api/preview/{self.id}" if video_available else None,
             "metadata": self.metadata,
             "error": self.error,
         }

@@ -47,6 +47,13 @@ def release_engine() -> None:
         _engine = None
     del engine
     gc.collect()
+    # ONNX/Pillow may release native buffers back to glibc only after trimming.
+    try:
+        import ctypes
+
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except (AttributeError, OSError):
+        pass
 
 
 def _outputs(result):

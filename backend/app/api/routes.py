@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import tempfile
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -13,17 +14,20 @@ import httpx
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
 from .. import config
 from ..jobs import (
     cache_job,
     cached_job,
+    cleanup_expired_videos,
     enqueue_generation,
     forget_job,
     job_from_payload,
     job_path,
     make_job,
+    persist_job,
     register_generation_handler,
     release_media_slot,
     set_progress,
@@ -38,6 +42,9 @@ from ..services.storage import add_upload, create_session, session_articles
 from ..video.renderer import render_video, validate_articles
 
 logger = logging.getLogger("matchcut.api")
+
+_DOWNLOAD_LOCK = threading.Lock()
+_DOWNLOADS_IN_PROGRESS: set[str] = set()
 
 router = APIRouter(prefix="/api")
 
@@ -305,7 +312,9 @@ def _safe_error(exc: BaseException) -> str:
 
 
 def _generation_worker(job: Job, request: GenerateRequest) -> None:
+    output_path: Path | None = None
     try:
+        cleanup_expired_videos()
         logger.info(
             "job=%s generate start word=%s pages=%s ratio=%s duration=%s fps=%s size=%sx%s sfx=%s highlight=%s",
             job.id, request.target_word, request.number_of_articles, request.aspect_ratio,
@@ -353,7 +362,7 @@ def _generation_worker(job: Job, request: GenerateRequest) -> None:
         set_progress(job, "07 — Designing Sound", 67, f"Preparing the {request.sfx_id} sound effect and {request.sound_style} background")
         output_width, output_height = ASPECT_DIMENSIONS[request.aspect_ratio] if request.aspect_ratio else (request.width, request.height)
         set_progress(job, "08 — Rendering Video", 73, f"Encoding {output_width} × {output_height} H.264 frames")
-        output_path = config.OUTPUT_DIR / f"{job.id}.mp4"
+        output_path = config.WORK_DIR / f"matchcut-video-{job.id}.mp4"
         def render_progress(value: int, message: str):
             percent = 73 + round(value * 0.23)
             stage = "07 — Designing Sound" if "sound timeline" in message.lower() else "08 — Rendering Video"
@@ -406,9 +415,11 @@ def _generation_worker(job: Job, request: GenerateRequest) -> None:
         job.video_path = str(output_path)
         job.metadata = metadata
         job.sources = sources
-        logger.info("job=%s complete bytes=%s url=/media/output/%s.mp4", job.id, output_path.stat().st_size, job.id)
+        logger.info("job=%s complete bytes=%s preview=/api/preview/%s", job.id, output_path.stat().st_size, job.id)
         set_progress(job, "09 — Finalizing MP4", 100, "MP4 is ready to preview and download", "complete")
     except Exception as exc:
+        if output_path is not None:
+            output_path.unlink(missing_ok=True)
         logger.exception("job=%s generate failed", job.id)
         job.error = _safe_error(exc)
         set_progress(job, "09 — Finalizing MP4", max(job.percent, 1), job.error, "failed")
@@ -496,16 +507,60 @@ def result(job_id: str):
     return _load_job(job_id).public_result()
 
 
+def _job_video_file(job: Job) -> Path:
+    if not job.video_path:
+        raise HTTPException(status_code=404, detail="Video file missing or expired")
+    path = Path(job.video_path)
+    try:
+        if path.resolve().parent != config.WORK_DIR.resolve() or not path.name.startswith("matchcut-video-"):
+            raise HTTPException(status_code=404, detail="Video file missing or expired")
+    except OSError as exc:
+        raise HTTPException(status_code=404, detail="Video file missing or expired") from exc
+    if not path.is_file() or path.stat().st_size < 1024:
+        raise HTTPException(status_code=404, detail="Video file missing or expired")
+    return path
+
+
+@router.get("/preview/{job_id}")
+def preview(job_id: str):
+    job = _load_job(job_id)
+    if job.status != "complete" or job.video_downloaded:
+        raise HTTPException(status_code=404, detail="Video is no longer available")
+    return FileResponse(_job_video_file(job), media_type="video/mp4")
+
+
+def _finish_video_download(job: Job, path: Path) -> None:
+    try:
+        path.unlink(missing_ok=True)
+        job.video_path = None
+        job.video_downloaded = True
+        try:
+            persist_job(job)
+        except OSError:
+            logger.exception("Could not persist consumed download job=%s", job.id)
+    except OSError:
+        logger.exception("Could not remove downloaded video job=%s", job.id)
+    finally:
+        with _DOWNLOAD_LOCK:
+            _DOWNLOADS_IN_PROGRESS.discard(job.id)
+
+
 @router.get("/download/{job_id}")
 def download(job_id: str):
     job = _load_job(job_id)
-    # Ensure the job has completed rendering and the video file exists and is non‑empty
-    if job.status != "complete" or not getattr(job, "video_path", None):
+    if job.status != "complete":
         raise HTTPException(status_code=404, detail="Video not ready")
-    path = Path(job.video_path)
-    if not path.is_file() or path.stat().st_size < 1024:
-        raise HTTPException(status_code=404, detail="Video file missing or incomplete")
-    return FileResponse(path, media_type="video/mp4", filename=f"{job_id}.mp4")
+    with _DOWNLOAD_LOCK:
+        if job.video_downloaded or job_id in _DOWNLOADS_IN_PROGRESS:
+            raise HTTPException(status_code=410, detail="This video has already been downloaded or is currently downloading.")
+        path = _job_video_file(job)
+        _DOWNLOADS_IN_PROGRESS.add(job_id)
+    return FileResponse(
+        path,
+        media_type="video/mp4",
+        filename=f"{job_id}.mp4",
+        background=BackgroundTask(_finish_video_download, job, path),
+    )
 
 @router.get("/sources/{job_id}")
 def sources(job_id: str):
