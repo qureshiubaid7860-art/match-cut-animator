@@ -3,7 +3,9 @@ import { useEffect, useRef } from 'react';
 const NATIVE_SCRIPT_URL = 'https://bauval.org/21/38665ed3aaafb452e7c929fc3a6fcaed';
 const NATIVE_CONTAINER_ID = 'container-38665ed3aaafb452e7c929fc3a6fcaed';
 const LEADERBOARD_KEY = '2f62314187284ae7163e951aa8cbf52f';
+const MOBILE_BANNER_KEY = 'db52cfb1d5cdba36e8ae565933b858fc';
 const LEADERBOARD_SCRIPT_URL = `https://bauval.org/22/${LEADERBOARD_KEY}`;
+const MOBILE_BANNER_SCRIPT_URL = `https://bauval.org/22/${MOBILE_BANNER_KEY}`;
 const OUT_OF_PAGE_SCRIPT_URLS = [
   'https://abscloud.org/1/288a600ee76cace6c347efa76a258495',
   'https://bauval.org/14/1188690258c118fe52d813aaeff2cb2d',
@@ -62,21 +64,23 @@ export function AdsterraLeaderboardBanner() {
 
   useEffect(() => {
     const container = adRef.current;
-    if (!container || leaderboardScriptRequested || !window.matchMedia('(min-width: 772px)').matches) return;
+    if (!container || leaderboardScriptRequested) return;
 
     leaderboardScriptRequested = true;
+    const isMobile = window.matchMedia('(max-width: 771px)').matches;
     window.atOptions = {
-      key: LEADERBOARD_KEY,
+      key: isMobile ? MOBILE_BANNER_KEY : LEADERBOARD_KEY,
       format: 'iframe',
-      height: 90,
-      width: 728,
+      height: isMobile ? 50 : 90,
+      width: isMobile ? 320 : 728,
       params: {},
     };
 
     const script = document.createElement('script');
     script.async = true;
     script.setAttribute('data-cfasync', 'false');
-    script.src = LEADERBOARD_SCRIPT_URL;
+    script.src = isMobile ? MOBILE_BANNER_SCRIPT_URL : LEADERBOARD_SCRIPT_URL;
+    container.dataset.adSize = isMobile ? 'mobile' : 'desktop';
     container.appendChild(script);
   }, []);
 
