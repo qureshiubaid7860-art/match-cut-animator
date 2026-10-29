@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { AdsterraLeaderboardBanner, AdsterraNativeBanner, AdsterraOutOfPageScripts } from './AdBanner.jsx';
 
 const API = (import.meta.env.VITE_API_ORIGIN || '').replace(/\/+$/, '');
+const OFFER_URL = 'https://uplcm.com/4/12148171';
+const OFFER_VISITED_KEY = 'matchcut.offerVisited';
 const ASPECT_RATIOS = [
   { id: '16:9', label: '16:9 — Landscape', shortLabel: 'LANDSCAPE', width: 1920, height: 1080 },
   { id: '9:16', label: '9:16 — Vertical / Shorts / Reels / TikTok', shortLabel: 'VERTICAL', width: 1080, height: 1920 },
@@ -178,6 +180,7 @@ function DemoVideo({ title, video, poster, mode }) {
 function App() {
   const [theme, setTheme] = useState(() => window.localStorage.getItem('matchcut.theme') === 'light' ? 'light' : 'dark');
   const [targetWord, setTargetWord] = useState('');
+  const [offerVisited, setOfferVisited] = useState(() => window.sessionStorage.getItem(OFFER_VISITED_KEY) === '1');
   const [duration, setDuration] = useState('6');
   const [articleCount, setArticleCount] = useState(savedPageCount);
   const [zoomLevel, setZoomLevel] = useState(() => savedRange('matchcut.zoomLevel', 1.5, 1, 2));
@@ -475,6 +478,14 @@ function App() {
       return;
     }
 
+    if (!offerVisited) {
+      setError('');
+      window.open(OFFER_URL, '_blank', 'noopener,noreferrer');
+      window.sessionStorage.setItem(OFFER_VISITED_KEY, '1');
+      setOfferVisited(true);
+      return;
+    }
+
     setError('');
     await beginGeneration();
   }
@@ -672,7 +683,7 @@ function App() {
             </details>
 
             {!completed && <button className="generate-button" type="submit" disabled={busy || isGenerating || !targetWord.trim()}>
-              <span>{isGenerating ? 'Generating...' : 'Generate Match Cut'}</span>
+              <span>{isGenerating ? 'Generating...' : offerVisited ? 'Generate Match Cut' : 'Visit Offer to Continue'} </span>
               <span className={`button-icon${busy ? ' spinning' : ''}`}><Icon name={busy ? 'spinner' : 'arrow'} size={19} /></span>
             </button>}
             <p className="service-note">{serviceNote}</p>
