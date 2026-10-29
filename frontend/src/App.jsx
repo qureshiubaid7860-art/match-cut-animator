@@ -945,6 +945,7 @@ function App() {
             <h2>Get in touch</h2>
             <button type="button" className="footer-feedback-button" onClick={() => setFeedbackOpen(true)}>Send feedback</button>
             <a href="mailto:qureshiubaid7860@gmail.com?subject=Match%20Cut%20Query">Ask a question <Icon name="arrow" size={13} /></a>
+            <a href="https://uplcm.com/4/12148171" target="_blank" rel="sponsored nofollow noopener noreferrer" referrerPolicy="no-referrer">Sponsored offer ↗</a>
           </div>
         </div>
         <div className="footer-base">
